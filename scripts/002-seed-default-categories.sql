@@ -13,5 +13,6 @@ INSERT INTO categories (id, user_id, name, type, is_default) VALUES
   (gen_random_uuid(), NULL, 'Education', 'expense', true),
   (gen_random_uuid(), NULL, 'Bills & Fees', 'expense', true),
   (gen_random_uuid(), NULL, 'Savings', 'expense', true),
-  (gen_random_uuid(), NULL, 'Other', 'expense', true)
+  (gen_random_uuid(), NULL, 'Other', 'expense', true),
+  (gen_random_uuid(), NULL, 'Rent', 'expense', true)
 ON CONFLICT DO NOTHING;
