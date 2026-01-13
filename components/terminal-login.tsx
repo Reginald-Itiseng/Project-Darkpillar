@@ -4,8 +4,7 @@ import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { getUser, setUser, setAuthenticated, initializeData } from "@/lib/storage"
-import type { User } from "@/lib/types"
+import { registerUser, loginUser } from "@/app/actions/auth"
 
 const BOOT_SEQUENCE = [
   "INITIALIZING SCP FOUNDATION FINANCIAL CONTAINMENT SYSTEM...",
@@ -13,6 +12,7 @@ const BOOT_SEQUENCE = [
   "ESTABLISHING ENCRYPTED CONNECTION...",
   "VERIFYING SYSTEM INTEGRITY... OK",
   "LOADING FINANCIAL ANOMALY DATABASE...",
+  "CONNECTING TO SECURE DATABASE...",
   "SYSTEM READY.",
   "",
   "═══════════════════════════════════════════════════════════════",
@@ -43,16 +43,6 @@ export function TerminalLogin() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    initializeData()
-
-    // Check if user exists
-    const existingUser = getUser()
-    if (existingUser) {
-      setMode("login")
-    } else {
-      setMode("register")
-    }
-
     // Boot sequence animation
     let currentLine = 0
     const bootInterval = setInterval(() => {
@@ -85,54 +75,42 @@ export function TerminalLogin() {
     setError("")
     setIsProcessing(true)
 
-    // Simulate processing delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      if (mode === "register") {
+        if (username.length < 3) {
+          setError("ERROR: AGENT DESIGNATION MUST BE AT LEAST 3 CHARACTERS")
+          setIsProcessing(false)
+          return
+        }
+        if (pin.length < 4) {
+          setError("ERROR: ACCESS CODE MUST BE AT LEAST 4 DIGITS")
+          setIsProcessing(false)
+          return
+        }
+        if (pin !== confirmPIN) {
+          setError("ERROR: ACCESS CODES DO NOT MATCH")
+          setIsProcessing(false)
+          return
+        }
 
-    if (mode === "register") {
-      if (username.length < 3) {
-        setError("ERROR: AGENT DESIGNATION MUST BE AT LEAST 3 CHARACTERS")
-        setIsProcessing(false)
-        return
+        const result = await registerUser(username.toUpperCase(), pin)
+        if (result.success) {
+          router.push("/dashboard")
+        } else {
+          setError(`ERROR: ${result.error?.toUpperCase()}`)
+        }
+      } else {
+        const result = await loginUser(username.toUpperCase(), pin)
+        if (result.success) {
+          router.push("/dashboard")
+        } else {
+          setError(`ERROR: ${result.error?.toUpperCase()}`)
+        }
       }
-      if (pin.length < 4) {
-        setError("ERROR: ACCESS CODE MUST BE AT LEAST 4 DIGITS")
-        setIsProcessing(false)
-        return
-      }
-      if (pin !== confirmPIN) {
-        setError("ERROR: ACCESS CODES DO NOT MATCH")
-        setIsProcessing(false)
-        return
-      }
-
-      const newUser: User = {
-        id: crypto.randomUUID(),
-        username: username.toUpperCase(),
-        pin,
-        clearanceLevel: 4,
-        createdAt: new Date().toISOString(),
-      }
-
-      setUser(newUser)
-      setAuthenticated(true)
-      router.push("/dashboard")
-    } else {
-      const user = getUser()
-      if (!user) {
-        setError("ERROR: NO AGENT PROFILE FOUND. INITIATING REGISTRATION...")
-        setMode("register")
-        setIsProcessing(false)
-        return
-      }
-
-      if (username.toUpperCase() !== user.username || pin !== user.pin) {
-        setError("ERROR: INVALID CREDENTIALS. ACCESS DENIED.")
-        setIsProcessing(false)
-        return
-      }
-
-      setAuthenticated(true)
-      router.push("/dashboard")
+    } catch (err) {
+      setError("ERROR: SYSTEM FAILURE. PLEASE TRY AGAIN.")
+    } finally {
+      setIsProcessing(false)
     }
   }
 
@@ -177,7 +155,7 @@ export function TerminalLogin() {
                         : "text-foreground"
                 } whitespace-pre`}
               >
-                {line || "\u00A0"} {/* Use non-breaking space for empty lines */}
+                {line || "\u00A0"}
               </div>
             ))}
 
@@ -187,9 +165,9 @@ export function TerminalLogin() {
                 <div className="text-muted-foreground mb-4">
                   {mode === "register" ? (
                     <>
-                      <span className="text-warning">[NOTICE]</span> NO AGENT PROFILE DETECTED.
+                      <span className="text-warning">[NOTICE]</span> NEW AGENT REGISTRATION.
                       <br />
-                      INITIATING NEW AGENT REGISTRATION PROTOCOL...
+                      INITIATING SECURE PROFILE CREATION PROTOCOL...
                     </>
                   ) : (
                     <>
@@ -253,25 +231,13 @@ export function TerminalLogin() {
                       {isProcessing ? "PROCESSING..." : mode === "register" ? "[REGISTER AGENT]" : "[AUTHENTICATE]"}
                     </button>
 
-                    {mode === "login" && (
-                      <button
-                        type="button"
-                        onClick={() => setMode("register")}
-                        className="text-muted-foreground hover:text-foreground font-mono text-sm"
-                      >
-                        [NEW AGENT REGISTRATION]
-                      </button>
-                    )}
-
-                    {mode === "register" && getUser() && (
-                      <button
-                        type="button"
-                        onClick={() => setMode("login")}
-                        className="text-muted-foreground hover:text-foreground font-mono text-sm"
-                      >
-                        [EXISTING AGENT LOGIN]
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setMode(mode === "login" ? "register" : "login")}
+                      className="text-muted-foreground hover:text-foreground font-mono text-sm"
+                    >
+                      {mode === "login" ? "[NEW AGENT REGISTRATION]" : "[EXISTING AGENT LOGIN]"}
+                    </button>
                   </div>
                 </form>
 

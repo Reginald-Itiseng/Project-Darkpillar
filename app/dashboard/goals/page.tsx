@@ -1,11 +1,10 @@
 "use client"
 
 import type React from "react"
-
-import { useEffect, useState } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getGoals, addGoal, updateGoal, deleteGoal } from "@/lib/storage"
+import { getGoals, addGoal, updateGoal, deleteGoal, contributeToGoal } from "@/app/actions/goals"
 import type { Goal } from "@/lib/types"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Plus, Target, X, Edit2, Trash2, CheckCircle, Pause, Play, AlertTriangle, Clock, Flag } from "lucide-react"
@@ -16,9 +15,11 @@ export default function GoalsPage() {
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
   const [showContributeModal, setShowContributeModal] = useState<Goal | null>(null)
   const [filter, setFilter] = useState<"all" | "active" | "completed" | "paused">("all")
+  const [isPending, startTransition] = useTransition()
 
-  const loadGoals = () => {
-    setGoals(getGoals())
+  const loadGoals = async () => {
+    const data = await getGoals()
+    setGoals(data)
   }
 
   useEffect(() => {
@@ -35,22 +36,28 @@ export default function GoalsPage() {
   const totalTargetAmount = activeGoals.reduce((sum, g) => sum + g.targetAmount, 0)
   const totalCurrentAmount = activeGoals.reduce((sum, g) => sum + g.currentAmount, 0)
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("CONFIRM GOAL DELETION?")) {
-      deleteGoal(id)
-      loadGoals()
+      startTransition(async () => {
+        await deleteGoal(id)
+        await loadGoals()
+      })
     }
   }
 
-  const handleToggleStatus = (goal: Goal) => {
+  const handleToggleStatus = async (goal: Goal) => {
     const newStatus = goal.status === "paused" ? "active" : "paused"
-    updateGoal(goal.id, { status: newStatus })
-    loadGoals()
+    startTransition(async () => {
+      await updateGoal(goal.id, { status: newStatus })
+      await loadGoals()
+    })
   }
 
-  const handleComplete = (goal: Goal) => {
-    updateGoal(goal.id, { status: "completed", currentAmount: goal.targetAmount })
-    loadGoals()
+  const handleComplete = async (goal: Goal) => {
+    startTransition(async () => {
+      await updateGoal(goal.id, { status: "completed", currentAmount: goal.targetAmount })
+      await loadGoals()
+    })
   }
 
   return (
@@ -332,8 +339,8 @@ export default function GoalsPage() {
             setShowModal(false)
             setEditingGoal(null)
           }}
-          onSave={() => {
-            loadGoals()
+          onSave={async () => {
+            await loadGoals()
             setShowModal(false)
             setEditingGoal(null)
           }}
@@ -345,8 +352,8 @@ export default function GoalsPage() {
         <ContributeModal
           goal={showContributeModal}
           onClose={() => setShowContributeModal(null)}
-          onSave={() => {
-            loadGoals()
+          onSave={async () => {
+            await loadGoals()
             setShowContributeModal(null)
           }}
         />
@@ -370,6 +377,7 @@ function GoalModal({
   const [deadline, setDeadline] = useState(goal?.deadline || "")
   const [priority, setPriority] = useState<Goal["priority"]>(goal?.priority || "medium")
   const [error, setError] = useState("")
+  const [isPending, startTransition] = useTransition()
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -390,22 +398,22 @@ function GoalModal({
       return
     }
 
-    const goalData = {
-      name: name.trim().toUpperCase(),
-      targetAmount: Number.parseFloat(targetAmount),
-      currentAmount: Number.parseFloat(currentAmount) || 0,
-      deadline,
-      priority,
-      status: goal?.status || ("active" as const),
-    }
+    startTransition(async () => {
+      const goalData = {
+        name: name.trim().toUpperCase(),
+        targetAmount: Number.parseFloat(targetAmount),
+        currentAmount: Number.parseFloat(currentAmount) || 0,
+        deadline,
+        priority,
+      }
 
-    if (goal) {
-      updateGoal(goal.id, goalData)
-    } else {
-      addGoal(goalData)
-    }
-
-    onSave()
+      if (goal) {
+        await updateGoal(goal.id, goalData)
+      } else {
+        await addGoal(goalData)
+      }
+      onSave()
+    })
   }
 
   return (
@@ -476,13 +484,13 @@ function GoalModal({
                   className={`p-2 rounded border font-mono text-xs transition-colors ${
                     priority === p
                       ? p === "low"
-                        ? "bg-muted/20 border-muted text-foreground"
+                        ? "bg-muted/20 border-muted text-muted-foreground"
                         : p === "medium"
                           ? "bg-primary/10 border-primary text-primary"
                           : p === "high"
                             ? "bg-warning/10 border-warning text-warning"
                             : "bg-destructive/10 border-destructive text-destructive"
-                      : "bg-secondary border-border text-muted-foreground hover:border-primary/50"
+                      : "bg-secondary border-border text-muted-foreground"
                   }`}
                 >
                   {p.toUpperCase()}
@@ -507,9 +515,10 @@ function GoalModal({
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors"
+              disabled={isPending}
+              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {goal ? "UPDATE" : "CREATE"}
+              {isPending ? "PROCESSING..." : goal ? "UPDATE" : "CREATE"}
             </button>
           </div>
         </form>
@@ -529,6 +538,7 @@ function ContributeModal({
 }) {
   const [amount, setAmount] = useState("")
   const [error, setError] = useState("")
+  const [isPending, startTransition] = useTransition()
 
   const remaining = goal.targetAmount - goal.currentAmount
 
@@ -541,22 +551,19 @@ function ContributeModal({
       return
     }
 
-    const newAmount = goal.currentAmount + Number.parseFloat(amount)
-    const status = newAmount >= goal.targetAmount ? "completed" : goal.status
-
-    updateGoal(goal.id, {
-      currentAmount: Math.min(newAmount, goal.targetAmount),
-      status,
+    startTransition(async () => {
+      await contributeToGoal(goal.id, Number.parseFloat(amount))
+      onSave()
     })
-
-    onSave()
   }
+
+  const quickAmounts = [100, 500, 1000, remaining > 0 ? remaining : null].filter(Boolean) as number[]
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg w-full max-w-sm overflow-hidden">
+      <div className="bg-card border border-border rounded-lg w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="font-mono text-sm text-foreground">ADD FUNDS</h2>
+          <h2 className="font-mono text-sm text-foreground">CONTRIBUTE TO OBJECTIVE</h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
@@ -564,15 +571,15 @@ function ContributeModal({
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
           <div className="p-3 bg-secondary/50 rounded border border-border">
-            <div className="font-mono text-xs text-muted-foreground mb-1">OBJECTIVE</div>
             <div className="font-mono text-sm text-foreground">{goal.name}</div>
-            <div className="font-mono text-xs text-muted-foreground mt-2">
-              REMAINING: <span className="text-primary">{formatCurrency(remaining)}</span>
+            <div className="font-mono text-xs text-muted-foreground mt-1">
+              {formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)} ({formatCurrency(remaining)}{" "}
+              remaining)
             </div>
           </div>
 
           <div>
-            <label className="font-mono text-xs text-muted-foreground block mb-2">CONTRIBUTION (P)</label>
+            <label className="font-mono text-xs text-muted-foreground block mb-2">CONTRIBUTION AMOUNT (P)</label>
             <input
               type="number"
               step="0.01"
@@ -580,32 +587,20 @@ function ContributeModal({
               onChange={(e) => setAmount(e.target.value)}
               className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
               placeholder="0.00"
-              autoFocus
             />
           </div>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setAmount((remaining / 4).toFixed(2))}
-              className="flex-1 px-2 py-1 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary"
-            >
-              25%
-            </button>
-            <button
-              type="button"
-              onClick={() => setAmount((remaining / 2).toFixed(2))}
-              className="flex-1 px-2 py-1 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary"
-            >
-              50%
-            </button>
-            <button
-              type="button"
-              onClick={() => setAmount(remaining.toFixed(2))}
-              className="flex-1 px-2 py-1 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary"
-            >
-              100%
-            </button>
+          <div className="flex flex-wrap gap-2">
+            {quickAmounts.map((quickAmount) => (
+              <button
+                key={quickAmount}
+                type="button"
+                onClick={() => setAmount(quickAmount.toString())}
+                className="px-3 py-1 border border-border rounded font-mono text-xs text-muted-foreground hover:bg-secondary transition-colors"
+              >
+                {quickAmount === remaining ? "FILL" : `+${formatCurrency(quickAmount)}`}
+              </button>
+            ))}
           </div>
 
           {error && (
@@ -614,7 +609,7 @@ function ContributeModal({
             </div>
           )}
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2 pt-4">
             <button
               type="button"
               onClick={onClose}
@@ -624,9 +619,10 @@ function ContributeModal({
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-success text-success-foreground font-mono text-sm rounded hover:bg-success/90 transition-colors"
+              disabled={isPending}
+              className="flex-1 px-4 py-2 bg-success text-success-foreground font-mono text-sm rounded hover:bg-success/90 transition-colors disabled:opacity-50"
             >
-              ADD FUNDS
+              {isPending ? "PROCESSING..." : "CONTRIBUTE"}
             </button>
           </div>
         </form>

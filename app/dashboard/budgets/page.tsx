@@ -1,11 +1,11 @@
 "use client"
 
 import type React from "react"
-
-import { useEffect, useState } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getBudgets, getCategories, addBudget, updateBudget, deleteBudget, getTransactions } from "@/lib/storage"
+import { getBudgets, addBudget, updateBudget, deleteBudget } from "@/app/actions/budgets"
+import { getCategories } from "@/app/actions/categories"
 import type { Budget, Category } from "@/lib/types"
 import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
 import {
@@ -27,40 +27,20 @@ export default function BudgetsPage() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [showModal, setShowModal] = useState(false)
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null)
+  const [isPending, startTransition] = useTransition()
 
-  const loadData = () => {
-    setBudgets(getBudgets())
-    setCategories(getCategories())
+  const loadData = async (month?: string) => {
+    const [budgetData, catData] = await Promise.all([getBudgets(month || selectedMonth), getCategories()])
+    setBudgets(budgetData)
+    setCategories(catData)
   }
 
   useEffect(() => {
     loadData()
-    recalculateSpent()
-  }, [])
+  }, [selectedMonth])
 
-  // Recalculate spent amounts based on transactions
-  const recalculateSpent = () => {
-    const transactions = getTransactions()
-    const allBudgets = getBudgets()
-
-    const updatedBudgets = allBudgets.map((budget) => {
-      const spent = transactions
-        .filter((t) => t.type === "expense" && t.category === budget.category && t.date.startsWith(budget.month))
-        .reduce((sum, t) => sum + t.amount, 0)
-
-      if (spent !== budget.spent) {
-        updateBudget(budget.id, { spent })
-        return { ...budget, spent }
-      }
-      return budget
-    })
-
-    setBudgets(updatedBudgets)
-  }
-
-  const monthBudgets = budgets.filter((b) => b.month === selectedMonth)
-  const totalBudgeted = monthBudgets.reduce((sum, b) => sum + b.amount, 0)
-  const totalSpent = monthBudgets.reduce((sum, b) => sum + b.spent, 0)
+  const totalBudgeted = budgets.reduce((sum, b) => sum + b.amount, 0)
+  const totalSpent = budgets.reduce((sum, b) => sum + b.spent, 0)
   const remaining = totalBudgeted - totalSpent
   const overallPercentage = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0
 
@@ -70,15 +50,17 @@ export default function BudgetsPage() {
     setSelectedMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("CONFIRM BUDGET DELETION?")) {
-      deleteBudget(id)
-      loadData()
+      startTransition(async () => {
+        await deleteBudget(id)
+        await loadData()
+      })
     }
   }
 
   const expenseCategories = categories.filter((c) => c.type === "expense")
-  const usedCategories = monthBudgets.map((b) => b.category)
+  const usedCategories = budgets.map((b) => b.category)
   const availableCategories = expenseCategories.filter((c) => !usedCategories.includes(c.name))
 
   return (
@@ -203,10 +185,10 @@ export default function BudgetsPage() {
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h2 className="font-mono text-sm text-foreground">BUDGET ALLOCATIONS</h2>
-              <span className="font-mono text-xs text-muted-foreground">{monthBudgets.length} CATEGORIES</span>
+              <span className="font-mono text-xs text-muted-foreground">{budgets.length} CATEGORIES</span>
             </div>
 
-            {monthBudgets.length === 0 ? (
+            {budgets.length === 0 ? (
               <div className="p-12 text-center">
                 <PiggyBank className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
                 <div className="font-mono text-sm text-muted-foreground">NO BUDGETS FOR THIS MONTH</div>
@@ -216,7 +198,7 @@ export default function BudgetsPage() {
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {monthBudgets.map((budget) => {
+                {budgets.map((budget) => {
                   const percentage = budget.amount > 0 ? (budget.spent / budget.amount) * 100 : 0
                   const status = percentage >= 100 ? "exceeded" : percentage >= 80 ? "warning" : "safe"
 
@@ -314,8 +296,8 @@ export default function BudgetsPage() {
             setShowModal(false)
             setEditingBudget(null)
           }}
-          onSave={() => {
-            loadData()
+          onSave={async () => {
+            await loadData()
             setShowModal(false)
             setEditingBudget(null)
           }}
@@ -341,6 +323,7 @@ function BudgetModal({
   const [category, setCategory] = useState(budget?.category || categories[0]?.name || "")
   const [amount, setAmount] = useState(budget?.amount?.toString() || "")
   const [error, setError] = useState("")
+  const [isPending, startTransition] = useTransition()
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -356,17 +339,18 @@ function BudgetModal({
       return
     }
 
-    if (budget) {
-      updateBudget(budget.id, { amount: Number.parseFloat(amount) })
-    } else {
-      addBudget({
-        category,
-        amount: Number.parseFloat(amount),
-        month,
-      })
-    }
-
-    onSave()
+    startTransition(async () => {
+      if (budget) {
+        await updateBudget(budget.id, { amount: Number.parseFloat(amount) })
+      } else {
+        await addBudget({
+          category,
+          amount: Number.parseFloat(amount),
+          month,
+        })
+      }
+      onSave()
+    })
   }
 
   return (
@@ -433,9 +417,10 @@ function BudgetModal({
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors"
+              disabled={isPending}
+              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {budget ? "UPDATE" : "CREATE"}
+              {isPending ? "PROCESSING..." : budget ? "UPDATE" : "CREATE"}
             </button>
           </div>
         </form>

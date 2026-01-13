@@ -1,84 +1,59 @@
-"use client"
-
 import type React from "react"
-
-import { useEffect, useState } from "react"
+import { redirect } from "next/navigation"
+import { getCurrentUser } from "@/app/actions/auth"
+import { getAccounts } from "@/app/actions/accounts"
+import { getTransactions } from "@/app/actions/transactions"
+import { getBudgets } from "@/app/actions/budgets"
+import { getGoals } from "@/app/actions/goals"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getAccounts, getTransactions, getBudgets, getGoals, getUser } from "@/lib/storage"
 import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
 import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 
-export default function DashboardPage() {
-  const [stats, setStats] = useState({
-    totalBalance: 0,
-    monthlyIncome: 0,
-    monthlyExpenses: 0,
-    activeGoals: 0,
-    budgetHealth: 0,
-  })
-  const [recentTransactions, setRecentTransactions] = useState<any[]>([])
-  const [budgetAlerts, setBudgetAlerts] = useState<any[]>([])
-  const [user, setUserState] = useState<{ username: string } | null>(null)
+export default async function DashboardPage() {
+  const user = await getCurrentUser()
+  if (!user) redirect("/")
 
-  useEffect(() => {
-    const userData = getUser()
-    if (userData) {
-      setUserState({ username: userData.username })
-    }
+  const [accounts, transactions, budgets, goals] = await Promise.all([
+    getAccounts(),
+    getTransactions(),
+    getBudgets(),
+    getGoals(),
+  ])
 
-    const accounts = getAccounts()
-    const transactions = getTransactions()
-    const budgets = getBudgets()
-    const goals = getGoals()
-    const currentMonth = getCurrentMonth()
+  const currentMonth = getCurrentMonth()
 
-    // Calculate stats
-    const totalBalance = accounts.filter((a) => a.isActive).reduce((sum, a) => sum + a.balance, 0)
+  // Calculate stats
+  const totalBalance = accounts.filter((a) => a.isActive).reduce((sum, a) => sum + a.balance, 0)
 
-    const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
+  const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
 
-    const monthlyIncome = monthlyTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
+  const monthlyIncome = monthlyTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
 
-    const monthlyExpenses = monthlyTransactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0)
+  const monthlyExpenses = monthlyTransactions.filter((t) => t.type === "expense").reduce((sum, t) => sum + t.amount, 0)
 
-    const activeGoals = goals.filter((g) => g.status === "active").length
+  const activeGoals = goals.filter((g) => g.status === "active").length
 
-    const currentBudgets = budgets.filter((b) => b.month === currentMonth)
-    const budgetHealth =
-      currentBudgets.length > 0
-        ? currentBudgets.reduce((sum, b) => {
-            const usage = b.amount > 0 ? (b.spent / b.amount) * 100 : 0
-            return sum + (usage <= 100 ? 100 - usage : 0)
-          }, 0) / currentBudgets.length
-        : 100
+  const currentBudgets = budgets.filter((b) => b.month === currentMonth)
+  const budgetHealth =
+    currentBudgets.length > 0
+      ? currentBudgets.reduce((sum, b) => {
+          const usage = b.amount > 0 ? (b.spent / b.amount) * 100 : 0
+          return sum + (usage <= 100 ? 100 - usage : 0)
+        }, 0) / currentBudgets.length
+      : 100
 
-    setStats({
-      totalBalance,
-      monthlyIncome,
-      monthlyExpenses,
-      activeGoals,
-      budgetHealth,
-    })
+  // Recent transactions
+  const recentTransactions = transactions.slice(0, 5)
 
-    // Recent transactions
-    setRecentTransactions(
-      transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5),
-    )
-
-    // Budget alerts
-    const alerts = currentBudgets
-      .map((b) => ({
-        ...b,
-        percentage: b.amount > 0 ? (b.spent / b.amount) * 100 : 0,
-      }))
-      .filter((b) => b.percentage >= 80)
-      .sort((a, b) => b.percentage - a.percentage)
-
-    setBudgetAlerts(alerts)
-  }, [])
+  // Budget alerts
+  const budgetAlerts = currentBudgets
+    .map((b) => ({
+      ...b,
+      percentage: b.amount > 0 ? (b.spent / b.amount) * 100 : 0,
+    }))
+    .filter((b) => b.percentage >= 80)
+    .sort((a, b) => b.percentage - a.percentage)
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -90,14 +65,14 @@ export default function DashboardPage() {
           <div className="mb-6 p-6 bg-card border border-border rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="font-mono text-2xl text-foreground mb-1">WELCOME BACK, AGENT {user?.username || ""}</h1>
+                <h1 className="font-mono text-2xl text-foreground mb-1">WELCOME BACK, AGENT {user.username}</h1>
                 <p className="font-mono text-sm text-muted-foreground">
                   FINANCIAL CONTAINMENT STATUS: <span className="text-success">STABLE</span> | REPORT DATE:{" "}
-                  {getMonthName(getCurrentMonth()).toUpperCase()}
+                  {getMonthName(currentMonth).toUpperCase()}
                 </p>
               </div>
               <div className="text-right font-mono text-xs text-muted-foreground">
-                <div>SESSION ID: {Math.random().toString(36).substring(2, 10).toUpperCase()}</div>
+                <div>SESSION ID: {user.id.substring(0, 8).toUpperCase()}</div>
                 <div className="text-primary">● SECURE CONNECTION</div>
               </div>
             </div>
@@ -107,28 +82,28 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard
               title="TOTAL ASSETS"
-              value={formatCurrency(stats.totalBalance)}
+              value={formatCurrency(totalBalance)}
               icon={Wallet}
               color="primary"
               subtitle="ALL ACTIVE ACCOUNTS"
             />
             <StatCard
               title="MONTHLY INCOME"
-              value={formatCurrency(stats.monthlyIncome)}
+              value={formatCurrency(monthlyIncome)}
               icon={TrendingUp}
               color="success"
               subtitle="CURRENT PERIOD"
             />
             <StatCard
               title="MONTHLY EXPENSES"
-              value={formatCurrency(stats.monthlyExpenses)}
+              value={formatCurrency(monthlyExpenses)}
               icon={TrendingDown}
               color="destructive"
               subtitle="CURRENT PERIOD"
             />
             <StatCard
               title="ACTIVE OBJECTIVES"
-              value={stats.activeGoals.toString()}
+              value={activeGoals.toString()}
               icon={Target}
               color="accent"
               subtitle="GOALS IN PROGRESS"
@@ -247,7 +222,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Clock className="w-3 h-3" />
-                  <span>LAST SYNC: REAL-TIME</span>
+                  <span>DATABASE: CONNECTED</span>
                 </div>
               </div>
               <div>SCP FOUNDATION FINANCIAL DIVISION | CLASSIFIED LEVEL 4</div>

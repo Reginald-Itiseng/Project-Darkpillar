@@ -1,11 +1,12 @@
 "use client"
 
 import type React from "react"
-
-import { useEffect, useState } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getTransactions, getAccounts, getCategories, addTransaction, addCategory } from "@/lib/storage"
+import { getTransactions, addTransaction } from "@/app/actions/transactions"
+import { getAccounts } from "@/app/actions/accounts"
+import { getCategories, addCategory } from "@/app/actions/categories"
 import type { Transaction, Account, Category } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth } from "@/lib/utils"
 import { Plus, TrendingUp, TrendingDown, ArrowLeftRight, Filter, X, Search, AlertCircle } from "lucide-react"
@@ -19,10 +20,11 @@ export default function TransactionsPage() {
   const [filterAccount, setFilterAccount] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
 
-  const loadData = () => {
-    setTransactions(getTransactions())
-    setAccounts(getAccounts())
-    setCategories(getCategories())
+  const loadData = async () => {
+    const [txData, accData, catData] = await Promise.all([getTransactions(), getAccounts(), getCategories()])
+    setTransactions(txData)
+    setAccounts(accData)
+    setCategories(catData)
   }
 
   useEffect(() => {
@@ -246,13 +248,13 @@ export default function TransactionsPage() {
           accounts={accounts.filter((a) => a.isActive)}
           categories={categories}
           onClose={() => setShowModal(false)}
-          onSave={() => {
-            loadData()
+          onSave={async () => {
+            await loadData()
             setShowModal(false)
           }}
-          onAddCategory={(category) => {
-            addCategory(category)
-            loadData()
+          onAddCategory={async (category) => {
+            await addCategory(category)
+            await loadData()
           }}
         />
       )}
@@ -283,6 +285,7 @@ function TransactionModal({
   const [error, setError] = useState("")
   const [showNewCategory, setShowNewCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
+  const [isPending, startTransition] = useTransition()
 
   const filteredCategories = categories.filter((c) => (type === "transfer" ? false : c.type === type))
 
@@ -302,57 +305,58 @@ function TransactionModal({
     }
 
     if (!accountId) {
-      setError("SOURCE ACCOUNT REQUIRED")
+      setError("SELECT AN ACCOUNT")
       return
     }
 
     if (type === "transfer" && !toAccountId) {
-      setError("DESTINATION ACCOUNT REQUIRED")
+      setError("SELECT DESTINATION ACCOUNT")
       return
     }
 
-    if (type === "transfer" && accountId === toAccountId) {
-      setError("CANNOT TRANSFER TO SAME ACCOUNT")
+    if (type !== "transfer" && !category) {
+      setError("SELECT A CATEGORY")
       return
     }
 
-    addTransaction({
-      type,
-      amount: Number.parseFloat(amount),
-      category: type === "transfer" ? "Transfer" : category,
-      description: description.trim().toUpperCase(),
-      accountId,
-      toAccountId: type === "transfer" ? toAccountId : undefined,
-      date,
+    startTransition(async () => {
+      await addTransaction({
+        type,
+        amount: Number.parseFloat(amount),
+        category: type === "transfer" ? "Transfer" : category,
+        description,
+        accountId,
+        toAccountId: type === "transfer" ? toAccountId : undefined,
+        date,
+      })
+      onSave()
     })
-
-    onSave()
   }
 
-  const handleAddCategory = () => {
-    if (newCategoryName.trim()) {
-      onAddCategory({
-        name: newCategoryName.trim().toUpperCase(),
-        type: type as "income" | "expense",
-      })
-      setCategory(newCategoryName.trim().toUpperCase())
-      setNewCategoryName("")
-      setShowNewCategory(false)
-    }
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return
+
+    await onAddCategory({
+      name: newCategoryName.trim().toUpperCase(),
+      type: type as "income" | "expense",
+    })
+
+    setCategory(newCategoryName.trim().toUpperCase())
+    setNewCategoryName("")
+    setShowNewCategory(false)
   }
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-card border border-border rounded-lg w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="font-mono text-sm text-foreground">NEW TRANSACTION ENTRY</h2>
+          <h2 className="font-mono text-sm text-foreground">NEW TRANSACTION</h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {/* Type Selection */}
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">TRANSACTION TYPE</label>
             <div className="grid grid-cols-3 gap-2">
@@ -364,30 +368,22 @@ function TransactionModal({
                     setType(t)
                     setCategory("")
                   }}
-                  className={`p-3 rounded border font-mono text-xs transition-colors ${
+                  className={`p-2 rounded border font-mono text-xs transition-colors ${
                     type === t
                       ? t === "income"
                         ? "bg-success/10 border-success text-success"
                         : t === "expense"
                           ? "bg-destructive/10 border-destructive text-destructive"
                           : "bg-primary/10 border-primary text-primary"
-                      : "bg-secondary border-border text-muted-foreground hover:border-primary/50"
+                      : "bg-secondary border-border text-muted-foreground"
                   }`}
                 >
-                  {t === "income" ? (
-                    <TrendingUp className="w-5 h-5 mx-auto mb-1" />
-                  ) : t === "expense" ? (
-                    <TrendingDown className="w-5 h-5 mx-auto mb-1" />
-                  ) : (
-                    <ArrowLeftRight className="w-5 h-5 mx-auto mb-1" />
-                  )}
                   {t.toUpperCase()}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Amount */}
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">AMOUNT (P)</label>
             <input
@@ -400,69 +396,43 @@ function TransactionModal({
             />
           </div>
 
-          {/* Account Selection */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="font-mono text-xs text-muted-foreground block mb-2">
-                {type === "transfer" ? "FROM ACCOUNT" : "ACCOUNT"}
-              </label>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-              >
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {type === "transfer" ? (
-              <div>
-                <label className="font-mono text-xs text-muted-foreground block mb-2">TO ACCOUNT</label>
-                <select
-                  value={toAccountId}
-                  onChange={(e) => setToAccountId(e.target.value)}
-                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                >
-                  <option value="">SELECT...</option>
-                  {accounts
-                    .filter((a) => a.id !== accountId)
-                    .map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            ) : (
-              <div>
-                <label className="font-mono text-xs text-muted-foreground block mb-2">DATE</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                />
-              </div>
-            )}
+          <div>
+            <label className="font-mono text-xs text-muted-foreground block mb-2">
+              {type === "transfer" ? "FROM ACCOUNT" : "ACCOUNT"}
+            </label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+            >
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           {type === "transfer" && (
             <div>
-              <label className="font-mono text-xs text-muted-foreground block mb-2">DATE</label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
+              <label className="font-mono text-xs text-muted-foreground block mb-2">TO ACCOUNT</label>
+              <select
+                value={toAccountId}
+                onChange={(e) => setToAccountId(e.target.value)}
                 className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-              />
+              >
+                <option value="">SELECT DESTINATION</option>
+                {accounts
+                  .filter((acc) => acc.id !== accountId)
+                  .map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name}
+                    </option>
+                  ))}
+              </select>
             </div>
           )}
 
-          {/* Category (not for transfers) */}
           {type !== "transfer" && (
             <div>
               <label className="font-mono text-xs text-muted-foreground block mb-2">CATEGORY</label>
@@ -474,21 +444,20 @@ function TransactionModal({
                     onChange={(e) => setNewCategoryName(e.target.value)}
                     className="flex-1 bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary uppercase"
                     placeholder="NEW CATEGORY NAME"
-                    autoFocus
                   />
                   <button
                     type="button"
                     onClick={handleAddCategory}
-                    className="px-3 py-2 bg-primary text-primary-foreground font-mono text-xs rounded hover:bg-primary/90"
+                    className="px-3 py-2 bg-primary text-primary-foreground font-mono text-xs rounded"
                   >
                     ADD
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowNewCategory(false)}
-                    className="px-3 py-2 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary"
+                    className="px-3 py-2 border border-border text-muted-foreground font-mono text-xs rounded"
                   >
-                    <X className="w-4 h-4" />
+                    CANCEL
                   </button>
                 </div>
               ) : (
@@ -507,7 +476,7 @@ function TransactionModal({
                   <button
                     type="button"
                     onClick={() => setShowNewCategory(true)}
-                    className="px-3 py-2 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary hover:text-foreground"
+                    className="px-3 py-2 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -516,15 +485,24 @@ function TransactionModal({
             </div>
           )}
 
-          {/* Description */}
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">DESCRIPTION (OPTIONAL)</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary uppercase"
-              placeholder="TRANSACTION DETAILS..."
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+              placeholder="TRANSACTION DETAILS"
+            />
+          </div>
+
+          <div>
+            <label className="font-mono text-xs text-muted-foreground block mb-2">DATE</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
             />
           </div>
 
@@ -544,9 +522,10 @@ function TransactionModal({
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors"
+              disabled={isPending}
+              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              RECORD ENTRY
+              {isPending ? "PROCESSING..." : "CREATE"}
             </button>
           </div>
         </form>

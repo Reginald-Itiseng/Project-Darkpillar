@@ -1,11 +1,10 @@
 "use client"
 
 import type React from "react"
-
-import { useEffect, useState } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getAccounts, addAccount, updateAccount } from "@/lib/storage"
+import { getAccounts, addAccount, updateAccount } from "@/app/actions/accounts"
 import type { Account } from "@/lib/types"
 import { formatCurrency, formatDate, calculateInterest } from "@/lib/utils"
 import {
@@ -28,9 +27,11 @@ export default function AccountsPage() {
   const [showModal, setShowModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [showMenu, setShowMenu] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
 
-  const loadAccounts = () => {
-    setAccounts(getAccounts())
+  const loadAccounts = async () => {
+    const data = await getAccounts()
+    setAccounts(data)
   }
 
   useEffect(() => {
@@ -41,10 +42,12 @@ export default function AccountsPage() {
   const inactiveAccounts = accounts.filter((a) => !a.isActive)
   const totalBalance = activeAccounts.reduce((sum, a) => sum + a.balance, 0)
 
-  const handleToggleActive = (account: Account) => {
-    updateAccount(account.id, { isActive: !account.isActive })
-    loadAccounts()
-    setShowMenu(null)
+  const handleToggleActive = async (account: Account) => {
+    startTransition(async () => {
+      await updateAccount(account.id, { isActive: !account.isActive })
+      await loadAccounts()
+      setShowMenu(null)
+    })
   }
 
   const handleEdit = (account: Account) => {
@@ -170,8 +173,8 @@ export default function AccountsPage() {
             setShowModal(false)
             setEditingAccount(null)
           }}
-          onSave={() => {
-            loadAccounts()
+          onSave={async () => {
+            await loadAccounts()
             setShowModal(false)
             setEditingAccount(null)
           }}
@@ -316,6 +319,7 @@ function AccountModal({
   const [maturityDate, setMaturityDate] = useState(account?.maturityDate || "")
   const [isPrimary, setIsPrimary] = useState(account?.isPrimary || false)
   const [error, setError] = useState("")
+  const [isPending, startTransition] = useTransition()
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -339,16 +343,16 @@ function AccountModal({
       depositDate: type === "fixed-deposit" ? depositDate : undefined,
       maturityDate: type === "fixed-deposit" ? maturityDate : undefined,
       isPrimary,
-      isActive: account?.isActive ?? true,
     }
 
-    if (account) {
-      updateAccount(account.id, accountData)
-    } else {
-      addAccount(accountData)
-    }
-
-    onSave()
+    startTransition(async () => {
+      if (account) {
+        await updateAccount(account.id, accountData)
+      } else {
+        await addAccount(accountData)
+      }
+      onSave()
+    })
   }
 
   return (
@@ -483,9 +487,10 @@ function AccountModal({
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors"
+              disabled={isPending}
+              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {account ? "UPDATE" : "CREATE"}
+              {isPending ? "PROCESSING..." : account ? "UPDATE" : "CREATE"}
             </button>
           </div>
         </form>
