@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import * as apiStorage from "@/lib/api-storage"
-import { LayoutDashboard, Wallet, ArrowLeftRight, Target, PiggyBank, LogOut, Shield } from "lucide-react"
+import { LayoutDashboard, Wallet, ArrowLeftRight, Target, PiggyBank, HandCoins, LogOut, Shield } from "lucide-react"
 
 const navItems = [
   {
@@ -31,6 +31,11 @@ const navItems = [
     label: "GOALS",
     href: "/dashboard/goals",
     icon: Target,
+  },
+  {
+    label: "LOANS",
+    href: "/dashboard/loans",
+    icon: HandCoins,
   },
 ]
 

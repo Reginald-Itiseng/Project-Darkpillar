@@ -10,11 +10,13 @@ SELECT gen_random_uuid(), NULL, v.name, v.type, true, NULL
 FROM (
   VALUES
     ('Interest - Savings Pocket', 'income'),
+    ('Loan Disbursement', 'income'),
     ('Bank Fees', 'expense'),
     ('Cash Withdrawal', 'expense'),
     ('CashPal Transfer', 'expense'),
     ('Savings Pocket Contribution', 'expense'),
-    ('Savings Pocket Withdrawal', 'expense')
+    ('Savings Pocket Withdrawal', 'expense'),
+    ('Loan Interest', 'expense')
 ) AS v(name, type)
 WHERE NOT EXISTS (
   SELECT 1

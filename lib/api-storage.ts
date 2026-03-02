@@ -1,4 +1,4 @@
-import type { User, Account, Transaction, Budget, Goal, Category } from './types'
+import type { User, Account, Transaction, Budget, Goal, Category, Loan, LoanPayment } from './types'
 
 export interface AdminInvite {
   code: string
@@ -51,6 +51,24 @@ function normalizeGoal(raw: any): Goal {
     targetAmount: toNumber(raw?.targetAmount),
     currentAmount: toNumber(raw?.currentAmount),
   } as Goal
+}
+
+function normalizeLoan(raw: any): Loan {
+  return {
+    ...raw,
+    principal: toNumber(raw?.principal),
+    annualRate: toNumber(raw?.annualRate),
+    outstandingPrincipal: toNumber(raw?.outstandingPrincipal),
+  } as Loan
+}
+
+function normalizeLoanPayment(raw: any): LoanPayment {
+  return {
+    ...raw,
+    totalAmount: toNumber(raw?.totalAmount),
+    principalComponent: toNumber(raw?.principalComponent),
+    interestComponent: toNumber(raw?.interestComponent),
+  } as LoanPayment
 }
 
 function getSessionToken(): string | null {
@@ -448,6 +466,88 @@ export async function addCategory(category: Omit<Category, 'id' | 'isDefault'>):
 
   const data = await response.json()
   return data.category
+}
+
+// ============================================================================
+// LOANS
+// ============================================================================
+
+export async function getLoans(): Promise<{ loans: Loan[]; payments: LoanPayment[] }> {
+  const response = await fetch('/api/financial/loans', {
+    method: 'GET',
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to fetch loans'))
+  }
+
+  const data = await response.json()
+  return {
+    loans: (data.loans || []).map(normalizeLoan),
+    payments: (data.payments || []).map(normalizeLoanPayment),
+  }
+}
+
+export async function addLoan(
+  loan: Omit<Loan, 'id' | 'createdAt' | 'outstandingPrincipal' | 'status'>
+): Promise<Loan> {
+  const response = await fetch('/api/financial/loans', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(loan),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to create loan'))
+  }
+
+  const data = await response.json()
+  return normalizeLoan(data.loan)
+}
+
+export async function updateLoan(id: string, updates: Partial<Loan>): Promise<Loan> {
+  const response = await fetch(`/api/financial/loans?id=${id}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(updates),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to update loan'))
+  }
+
+  const data = await response.json()
+  return normalizeLoan(data.loan)
+}
+
+export async function addLoanPayment(payload: {
+  loanId: string
+  accountId: string
+  totalAmount: number
+  paymentDate: string
+  interestComponent?: number
+  note?: string
+}): Promise<{ payment: LoanPayment; loan: Loan }> {
+  const response = await fetch('/api/financial/loans/payments', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to create loan payment'))
+  }
+
+  const data = await response.json()
+  return {
+    payment: normalizeLoanPayment(data.payment),
+    loan: normalizeLoan(data.loan),
+  }
 }
 
 // ============================================================================

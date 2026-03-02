@@ -60,11 +60,38 @@ export interface Category {
   icon?: string
 }
 
+export interface Loan {
+  id: string
+  lenderName: string
+  accountId: string
+  principal: number
+  annualRate: number
+  startDate: string
+  dueDate: string
+  outstandingPrincipal: number
+  status: "active" | "paid" | "defaulted"
+  notes?: string
+  createdAt: string
+}
+
+export interface LoanPayment {
+  id: string
+  loanId: string
+  accountId: string
+  paymentDate: string
+  totalAmount: number
+  principalComponent: number
+  interestComponent: number
+  note?: string
+  createdAt: string
+}
+
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: "1", name: "Salary", type: "income", isDefault: true },
   { id: "2", name: "Freelance", type: "income", isDefault: true },
   { id: "3", name: "Investments", type: "income", isDefault: true },
   { id: "4", name: "Other Income", type: "income", isDefault: true },
+  { id: "21", name: "Loan Disbursement", type: "income", isDefault: true },
   { id: "15", name: "Interest - Savings Pocket", type: "income", isDefault: true },
   { id: "5", name: "Food & Dining", type: "expense", isDefault: true },
   { id: "6", name: "Transportation", type: "expense", isDefault: true },
@@ -81,4 +108,5 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: "18", name: "CashPal Transfer", type: "expense", isDefault: true },
   { id: "19", name: "Savings Pocket Contribution", type: "expense", isDefault: true },
   { id: "20", name: "Savings Pocket Withdrawal", type: "expense", isDefault: true },
+  { id: "22", name: "Loan Interest", type: "expense", isDefault: true },
 ]
