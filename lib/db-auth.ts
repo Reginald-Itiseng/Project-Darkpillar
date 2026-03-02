@@ -139,7 +139,7 @@ export async function createSession(
       `
       INSERT INTO neon_auth.session (
         id,
-        userId,
+        "userId",
         token,
         "expiresAt",
         "createdAt",
@@ -214,13 +214,13 @@ export async function storePasswordHash(
   passwordHash: string
 ): Promise<boolean> {
   try {
-    const result = await query(
+    await query(
       `
       INSERT INTO neon_auth.account (
         id,
-        userId,
-        providerId,
-        accountId,
+        "userId",
+        "providerId",
+        "accountId",
         password,
         "createdAt",
         "updatedAt"
@@ -234,7 +234,7 @@ export async function storePasswordHash(
         NOW(),
         NOW()
       )
-      ON CONFLICT (userId, providerId) 
+      ON CONFLICT ("userId", "providerId")
       DO UPDATE SET password = $2, "updatedAt" = NOW()
       `,
       [userId, passwordHash]
@@ -256,7 +256,7 @@ export async function getPasswordHash(userId: string): Promise<string | null> {
       `
       SELECT password
       FROM neon_auth.account
-      WHERE userId = $1 AND providerId = 'password'
+      WHERE "userId" = $1 AND "providerId" = 'password'
       `,
       [userId]
     )
