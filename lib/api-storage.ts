@@ -550,6 +550,37 @@ export async function addLoanPayment(payload: {
   }
 }
 
+export async function modelSinglePaymentLoan(payload: {
+  principal_amount: number
+  flat_interest_rate: number
+  loan_duration_days: number
+  start_date?: string
+}): Promise<{
+  total_due: number
+  due_date: string
+  effective_apr: number
+  high_priority_debt: boolean
+}> {
+  const response = await fetch('/api/financial/loans/model', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to model loan'))
+  }
+
+  const data = await response.json()
+  return {
+    total_due: toNumber(data.total_due),
+    due_date: String(data.due_date || ''),
+    effective_apr: toNumber(data.effective_apr),
+    high_priority_debt: Boolean(data.high_priority_debt),
+  }
+}
+
 // ============================================================================
 // UTILITY
 // ============================================================================

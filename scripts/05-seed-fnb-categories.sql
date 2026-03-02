@@ -3,6 +3,11 @@
 -- ============================================================================
 -- Inserts global default categories that are useful with CashPal + Savings Pocket
 -- flows in Botswana. Safe to run multiple times.
+--
+-- High-priority debt snippet for single-payment short-term loans:
+-- IF effective_apr > 36 THEN
+--   set debt_priority = 'High-Priority Debt'
+-- END IF;
 -- ============================================================================
 
 INSERT INTO public.categories (id, user_id, name, type, is_default, icon)

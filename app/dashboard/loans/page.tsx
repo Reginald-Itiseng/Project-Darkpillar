@@ -16,6 +16,13 @@ function isDueSoon(dueDate: string): boolean {
   return diffDays >= 0 && diffDays <= 7
 }
 
+type LoanModelResult = {
+  total_due: number
+  due_date: string
+  effective_apr: number
+  high_priority_debt: boolean
+}
+
 export default function LoansPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loans, setLoans] = useState<Loan[]>([])
@@ -23,6 +30,12 @@ export default function LoansPage() {
   const [showLoanModal, setShowLoanModal] = useState(false)
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null)
   const [paymentLoan, setPaymentLoan] = useState<Loan | null>(null)
+  const [modelPrincipal, setModelPrincipal] = useState("")
+  const [modelFlatRate, setModelFlatRate] = useState("")
+  const [modelDurationDays, setModelDurationDays] = useState("")
+  const [modelResult, setModelResult] = useState<LoanModelResult | null>(null)
+  const [modelError, setModelError] = useState("")
+  const [isModeling, setIsModeling] = useState(false)
 
   const loadData = async () => {
     const [accountsData, loanData] = await Promise.all([apiStorage.getAccounts(), apiStorage.getLoans()])
@@ -48,6 +61,31 @@ export default function LoansPage() {
     accounts.forEach((account) => map.set(account.id, account.name))
     return map
   }, [accounts])
+
+  const handleModelLoan = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setModelError("")
+    setModelResult(null)
+
+    try {
+      setIsModeling(true)
+      const principal = Number(modelPrincipal)
+      const flatRatePercent = Number(modelFlatRate)
+      const durationDays = Number(modelDurationDays)
+
+      const result = await apiStorage.modelSinglePaymentLoan({
+        principal_amount: principal,
+        flat_interest_rate: flatRatePercent / 100,
+        loan_duration_days: durationDays,
+      })
+
+      setModelResult(result)
+    } catch (err) {
+      setModelError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO MODEL LOAN")
+    } finally {
+      setIsModeling(false)
+    }
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -99,6 +137,105 @@ export default function LoansPage() {
                 <div className="font-mono text-xs text-muted-foreground">INTEREST PAID THIS MONTH</div>
               </div>
               <div className="font-mono text-2xl text-foreground">{formatCurrency(monthlyInterestPaid)}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="p-4 border-b border-border">
+                <h2 className="font-mono text-sm text-foreground">SINGLE-PAYMENT LOAN MODEL</h2>
+                <p className="font-mono text-xs text-muted-foreground mt-1">
+                  FLAT INTEREST LOAN WITH ONE REPAYMENT AT DUE DATE
+                </p>
+              </div>
+              <form onSubmit={handleModelLoan} className="p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="font-mono text-xs text-muted-foreground block mb-2">PRINCIPAL (P)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={modelPrincipal}
+                      onChange={(e) => setModelPrincipal(e.target.value)}
+                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="font-mono text-xs text-muted-foreground block mb-2">FLAT INTEREST (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={modelFlatRate}
+                      onChange={(e) => setModelFlatRate(e.target.value)}
+                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="font-mono text-xs text-muted-foreground block mb-2">DURATION (DAYS)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={modelDurationDays}
+                      onChange={(e) => setModelDurationDays(e.target.value)}
+                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {modelError && (
+                  <div className="p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+                    {modelError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isModeling}
+                  className="px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 disabled:opacity-60"
+                >
+                  {isModeling ? "MODELING..." : "MODEL LOAN"}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="p-4 border-b border-border">
+                <h2 className="font-mono text-sm text-foreground">MODEL OUTPUT</h2>
+                <p className="font-mono text-xs text-muted-foreground mt-1">
+                  JSON FIELDS: TOTAL_DUE, DUE_DATE, EFFECTIVE_APR
+                </p>
+              </div>
+              <div className="p-4 space-y-3">
+                {modelResult ? (
+                  <>
+                    <div className="p-3 bg-secondary/40 border border-border rounded">
+                      <pre className="font-mono text-xs text-foreground whitespace-pre-wrap break-all">
+{JSON.stringify(modelResult, null, 2)}
+                      </pre>
+                    </div>
+
+                    {modelResult.high_priority_debt && (
+                      <div className="p-3 bg-destructive/10 border border-destructive/30 rounded">
+                        <div className="font-mono text-xs text-destructive flex items-center gap-2">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          HIGH-PRIORITY DEBT: APR ABOVE 36%
+                        </div>
+                        <div className="font-mono text-xs text-muted-foreground mt-2">
+                          BUDGET ACTION: CREATE/INCREASE A "LOAN REPAYMENT" ENVELOPE BEFORE {formatDate(modelResult.due_date)}.
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="p-3 bg-secondary/40 border border-border rounded font-mono text-xs text-muted-foreground">
+                    RUN THE MODEL TO SEE REPAYMENT TOTAL, DUE DATE, APR, AND PRIORITY FLAG.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
