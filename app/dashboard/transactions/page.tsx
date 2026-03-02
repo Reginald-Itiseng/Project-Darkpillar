@@ -49,10 +49,10 @@ export default function TransactionsPage() {
   const currentMonth = getCurrentMonth()
   const monthlyIncome = transactions
     .filter((t) => t.type === "income" && t.date.startsWith(currentMonth))
-    .reduce((sum, t) => sum + t.amount, 0)
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
   const monthlyExpenses = transactions
     .filter((t) => t.type === "expense" && t.date.startsWith(currentMonth))
-    .reduce((sum, t) => sum + t.amount, 0)
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
   const netFlow = monthlyIncome - monthlyExpenses
 
   const getAccountName = (id: string) => {

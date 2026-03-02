@@ -39,15 +39,19 @@ export default function DashboardPage() {
 
       const currentMonth = getCurrentMonth()
 
-      const totalBalance = accounts.filter((a) => a.isActive).reduce((sum, a) => sum + a.balance, 0)
+      const totalBalance = accounts
+        .filter((a) => a.isActive)
+        .reduce((sum, a) => sum + (Number(a.balance) || 0), 0)
 
       const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
 
-      const monthlyIncome = monthlyTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
+      const monthlyIncome = monthlyTransactions
+        .filter((t) => t.type === "income")
+        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
 
       const monthlyExpenses = monthlyTransactions
         .filter((t) => t.type === "expense")
-        .reduce((sum, t) => sum + t.amount, 0)
+        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
 
       const activeGoals = goals.filter((g: Goal) => g.status === "active").length
 
@@ -55,7 +59,9 @@ export default function DashboardPage() {
       const budgetHealth =
         currentBudgets.length > 0
           ? currentBudgets.reduce((sum, b) => {
-              const usage = b.amount > 0 ? (b.spent / b.amount) * 100 : 0
+              const amount = Number(b.amount) || 0
+              const spent = Number(b.spent) || 0
+              const usage = amount > 0 ? (spent / amount) * 100 : 0
               return sum + (usage <= 100 ? 100 - usage : 0)
             }, 0) / currentBudgets.length
           : 100
@@ -75,7 +81,7 @@ export default function DashboardPage() {
       const alerts = currentBudgets
         .map((b) => ({
           ...b,
-          percentage: b.amount > 0 ? (b.spent / b.amount) * 100 : 0,
+          percentage: (Number(b.amount) || 0) > 0 ? ((Number(b.spent) || 0) / (Number(b.amount) || 0)) * 100 : 0,
         }))
         .filter((b) => b.percentage >= 80)
         .sort((a, b) => b.percentage - a.percentage)

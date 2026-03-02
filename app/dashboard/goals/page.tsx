@@ -33,8 +33,8 @@ export default function GoalsPage() {
 
   const activeGoals = goals.filter((g) => g.status === "active")
   const completedGoals = goals.filter((g) => g.status === "completed")
-  const totalTargetAmount = activeGoals.reduce((sum, g) => sum + g.targetAmount, 0)
-  const totalCurrentAmount = activeGoals.reduce((sum, g) => sum + g.currentAmount, 0)
+  const totalTargetAmount = activeGoals.reduce((sum, g) => sum + (Number(g.targetAmount) || 0), 0)
+  const totalCurrentAmount = activeGoals.reduce((sum, g) => sum + (Number(g.currentAmount) || 0), 0)
 
   const handleDelete = async (id: string) => {
     if (confirm("CONFIRM GOAL DELETION?")) {
@@ -147,7 +147,9 @@ export default function GoalsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredGoals.map((goal) => {
-                const percentage = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0
+                const targetAmount = Number(goal.targetAmount) || 0
+                const currentAmount = Number(goal.currentAmount) || 0
+                const percentage = targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0
                 const daysRemaining = Math.ceil(
                   (new Date(goal.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24),
                 )
@@ -267,14 +269,16 @@ export default function GoalsPage() {
                       {/* Amounts */}
                       <div className="flex items-center justify-between mb-3">
                         <div>
-                          <div className="font-mono text-lg text-foreground">{formatCurrency(goal.currentAmount)}</div>
+                          <div className="font-mono text-lg text-foreground">
+                            {formatCurrency(Number(goal.currentAmount) || 0)}
+                          </div>
                           <div className="font-mono text-xs text-muted-foreground">
-                            of {formatCurrency(goal.targetAmount)}
+                            of {formatCurrency(Number(goal.targetAmount) || 0)}
                           </div>
                         </div>
                         <div className="text-right">
                           <div className="font-mono text-sm text-muted-foreground">
-                            {formatCurrency(goal.targetAmount - goal.currentAmount)}
+                            {formatCurrency((Number(goal.targetAmount) || 0) - (Number(goal.currentAmount) || 0))}
                           </div>
                           <div className="font-mono text-xs text-muted-foreground">REMAINING</div>
                         </div>

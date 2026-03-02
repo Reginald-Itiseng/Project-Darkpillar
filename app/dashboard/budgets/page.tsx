@@ -39,8 +39,8 @@ export default function BudgetsPage() {
   }, [])
 
   const monthBudgets = budgets.filter((b) => b.month === selectedMonth)
-  const totalBudgeted = monthBudgets.reduce((sum, b) => sum + b.amount, 0)
-  const totalSpent = monthBudgets.reduce((sum, b) => sum + b.spent, 0)
+  const totalBudgeted = monthBudgets.reduce((sum, b) => sum + (Number(b.amount) || 0), 0)
+  const totalSpent = monthBudgets.reduce((sum, b) => sum + (Number(b.spent) || 0), 0)
   const remaining = totalBudgeted - totalSpent
   const overallPercentage = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0
 
@@ -197,7 +197,9 @@ export default function BudgetsPage() {
             ) : (
               <div className="divide-y divide-border">
                 {monthBudgets.map((budget) => {
-                  const percentage = budget.amount > 0 ? (budget.spent / budget.amount) * 100 : 0
+                  const amount = Number(budget.amount) || 0
+                  const spent = Number(budget.spent) || 0
+                  const percentage = amount > 0 ? (spent / amount) * 100 : 0
                   const status = percentage >= 100 ? "exceeded" : percentage >= 80 ? "warning" : "safe"
 
                   return (

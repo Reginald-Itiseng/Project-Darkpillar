@@ -40,7 +40,7 @@ export default function AccountsPage() {
 
   const activeAccounts = accounts.filter((a) => a.isActive)
   const inactiveAccounts = accounts.filter((a) => !a.isActive)
-  const totalBalance = activeAccounts.reduce((sum, a) => sum + a.balance, 0)
+  const totalBalance = activeAccounts.reduce((sum, a) => sum + (Number(a.balance) || 0), 0)
 
   const handleToggleActive = async (account: Account) => {
     await apiStorage.updateAccount(account.id, { isActive: !account.isActive })
