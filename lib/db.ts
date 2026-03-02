@@ -1,4 +1,4 @@
-import { Pool, PoolClient, QueryResult } from '@neondatabase/serverless'
+import { Pool, PoolClient, QueryResult, QueryResultRow } from '@neondatabase/serverless'
 
 // Initialize connection pool
 let pool: Pool | null = null
@@ -18,7 +18,7 @@ export function getPool(): Pool {
 /**
  * Execute a query with automatic user_id setting for RLS
  */
-export async function query<T = any>(
+export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values?: any[],
   userId?: string
