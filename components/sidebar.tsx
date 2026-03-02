@@ -83,6 +83,18 @@ export function Sidebar() {
               </Link>
             )
           })}
+          <Link
+            href="/dashboard/admin"
+            className={cn(
+              "mt-4 flex items-center gap-3 px-4 py-3 rounded font-mono text-sm transition-colors border",
+              pathname === "/dashboard/admin"
+                ? "bg-warning/10 text-warning border-warning/30"
+                : "text-muted-foreground border-border hover:text-foreground hover:bg-secondary",
+            )}
+          >
+            <Shield className="w-4 h-4" />
+            <span>ADMIN CONTROLS</span>
+          </Link>
         </div>
       </nav>
 

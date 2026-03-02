@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import type React from "react"
 
@@ -8,7 +8,7 @@ import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
 import type { Budget, Goal, Transaction } from "@/lib/types"
 import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
-import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock, Shield, Copy } from "lucide-react"
+import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
@@ -20,12 +20,7 @@ export default function DashboardPage() {
   })
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
   const [budgetAlerts, setBudgetAlerts] = useState<Array<Budget & { percentage: number }>>([])
-  const [user, setUserState] = useState<{ username: string; clearanceLevel: number } | null>(null)
-  const [inviteMaxUses, setInviteMaxUses] = useState(1)
-  const [inviteExpiresDays, setInviteExpiresDays] = useState(14)
-  const [createdInvite, setCreatedInvite] = useState<apiStorage.AdminInvite | null>(null)
-  const [isCreatingInvite, setIsCreatingInvite] = useState(false)
-  const [adminMessage, setAdminMessage] = useState("")
+  const [user, setUserState] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -39,12 +34,11 @@ export default function DashboardPage() {
 
       if (userData) {
         apiStorage.setCurrentUser(userData)
-        setUserState({ username: userData.username, clearanceLevel: userData.clearanceLevel })
+        setUserState({ username: userData.username })
       }
 
       const currentMonth = getCurrentMonth()
 
-      // Calculate stats
       const totalBalance = accounts.filter((a) => a.isActive).reduce((sum, a) => sum + a.balance, 0)
 
       const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
@@ -74,12 +68,10 @@ export default function DashboardPage() {
         budgetHealth,
       })
 
-      // Recent transactions
       setRecentTransactions(
         [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5),
       )
 
-      // Budget alerts
       const alerts = currentBudgets
         .map((b) => ({
           ...b,
@@ -94,42 +86,12 @@ export default function DashboardPage() {
     void loadDashboardData()
   }, [])
 
-  const isAdmin = (user?.clearanceLevel || 0) >= 4
-
-  const handleCreateInvite = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setAdminMessage("")
-    setIsCreatingInvite(true)
-
-    try {
-      const invite = await apiStorage.createInviteCode(inviteMaxUses, inviteExpiresDays)
-      setCreatedInvite(invite)
-      setAdminMessage("INVITE CODE GENERATED")
-    } catch (error) {
-      setAdminMessage(error instanceof Error ? error.message.toUpperCase() : "FAILED TO CREATE INVITE")
-    } finally {
-      setIsCreatingInvite(false)
-    }
-  }
-
-  const handleCopyInvite = async () => {
-    if (!createdInvite) return
-
-    try {
-      await navigator.clipboard.writeText(createdInvite.code)
-      setAdminMessage("INVITE CODE COPIED")
-    } catch {
-      setAdminMessage("COPY FAILED - MANUAL COPY REQUIRED")
-    }
-  }
-
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <div className="flex-1 flex flex-col">
         <Header />
         <main className="flex-1 p-6 overflow-auto">
-          {/* Welcome Banner */}
           <div className="mb-6 p-6 bg-card border border-border rounded-lg">
             <div className="flex items-center justify-between">
               <div>
@@ -141,12 +103,11 @@ export default function DashboardPage() {
               </div>
               <div className="text-right font-mono text-xs text-muted-foreground">
                 <div>SESSION ID: {Math.random().toString(36).substring(2, 10).toUpperCase()}</div>
-                <div className="text-primary">● SECURE CONNECTION</div>
+                <div className="text-primary">â— SECURE CONNECTION</div>
               </div>
             </div>
           </div>
 
-          {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard
               title="TOTAL ASSETS"
@@ -178,81 +139,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {isAdmin && (
-            <div className="mb-6 bg-card border border-border rounded-lg overflow-hidden">
-              <div className="p-4 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-warning" />
-                  <h2 className="font-mono text-sm text-foreground">ADMIN CONTROLS</h2>
-                </div>
-                <span className="font-mono text-xs text-warning">INVITE-ONLY REGISTRATION</span>
-              </div>
-
-              <div className="p-4">
-                <form onSubmit={handleCreateInvite} className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-                  <div>
-                    <label className="font-mono text-xs text-muted-foreground block mb-2">MAX USES</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={inviteMaxUses}
-                      onChange={(e) => setInviteMaxUses(Number(e.target.value) || 1)}
-                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="font-mono text-xs text-muted-foreground block mb-2">EXPIRES (DAYS)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={365}
-                      value={inviteExpiresDays}
-                      onChange={(e) => setInviteExpiresDays(Number(e.target.value) || 14)}
-                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                    />
-                  </div>
-                  <div className="md:col-span-2 flex items-end">
-                    <button
-                      type="submit"
-                      disabled={isCreatingInvite}
-                      className="w-full px-4 py-2 bg-warning text-warning-foreground font-mono text-sm rounded hover:bg-warning/90 transition-colors disabled:opacity-50"
-                    >
-                      {isCreatingInvite ? "GENERATING..." : "GENERATE INVITE CODE"}
-                    </button>
-                  </div>
-                </form>
-
-                {createdInvite && (
-                  <div className="p-4 bg-secondary/50 border border-border rounded">
-                    <div className="font-mono text-xs text-muted-foreground mb-2">LATEST INVITE CODE</div>
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                      <div>
-                        <div className="font-mono text-lg text-primary">{createdInvite.code}</div>
-                        <div className="font-mono text-xs text-muted-foreground mt-1">
-                          MAX USES: {createdInvite.maxUses} | EXPIRY:{" "}
-                          {createdInvite.expiresAt ? new Date(createdInvite.expiresAt).toLocaleString() : "NONE"}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleCopyInvite}
-                        className="flex items-center justify-center gap-2 px-3 py-2 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary rounded font-mono text-xs transition-colors"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        COPY
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {adminMessage && <div className="mt-3 font-mono text-xs text-warning">{adminMessage}</div>}
-              </div>
-            </div>
-          )}
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Recent Transactions */}
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               <div className="p-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-mono text-sm text-foreground">RECENT TRANSACTIONS</h2>
@@ -306,7 +193,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Budget Alerts */}
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               <div className="p-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-mono text-sm text-foreground">CONTAINMENT ALERTS</h2>
@@ -353,7 +239,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* System Status */}
           <div className="mt-6 p-4 bg-card border border-border rounded-lg">
             <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
               <div className="flex items-center gap-6">
