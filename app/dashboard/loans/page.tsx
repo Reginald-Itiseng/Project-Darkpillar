@@ -23,6 +23,45 @@ type LoanModelResult = {
   high_priority_debt: boolean
 }
 
+type StoredLoanModel = {
+  kind: "single-payment"
+  flat_interest_rate: number
+  loan_duration_days: number
+  total_due: number
+  effective_apr: number
+  high_priority_debt: boolean
+}
+
+const LOAN_MODEL_PREFIX = "__SINGLE_PAYMENT_MODEL__:"
+
+function parseLoanNotes(notes?: string): { model: StoredLoanModel | null; plainNotes: string } {
+  if (!notes) return { model: null, plainNotes: "" }
+
+  const [firstLine, ...rest] = notes.split("\n")
+  if (!firstLine.startsWith(LOAN_MODEL_PREFIX)) {
+    return { model: null, plainNotes: notes }
+  }
+
+  try {
+    const raw = JSON.parse(firstLine.slice(LOAN_MODEL_PREFIX.length)) as StoredLoanModel
+    if (raw?.kind !== "single-payment") {
+      return { model: null, plainNotes: rest.join("\n").trim() }
+    }
+    return { model: raw, plainNotes: rest.join("\n").trim() }
+  } catch {
+    return { model: null, plainNotes: notes }
+  }
+}
+
+function composeLoanNotes(plainNotes: string, model: StoredLoanModel | null): string | undefined {
+  const normalizedNotes = plainNotes.trim()
+  if (!model && !normalizedNotes) return undefined
+  if (!model) return normalizedNotes
+
+  const modelLine = `${LOAN_MODEL_PREFIX}${JSON.stringify(model)}`
+  return normalizedNotes ? `${modelLine}\n${normalizedNotes}` : modelLine
+}
+
 export default function LoansPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loans, setLoans] = useState<Loan[]>([])
@@ -30,12 +69,6 @@ export default function LoansPage() {
   const [showLoanModal, setShowLoanModal] = useState(false)
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null)
   const [paymentLoan, setPaymentLoan] = useState<Loan | null>(null)
-  const [modelPrincipal, setModelPrincipal] = useState("")
-  const [modelFlatRate, setModelFlatRate] = useState("")
-  const [modelDurationDays, setModelDurationDays] = useState("")
-  const [modelResult, setModelResult] = useState<LoanModelResult | null>(null)
-  const [modelError, setModelError] = useState("")
-  const [isModeling, setIsModeling] = useState(false)
 
   const loadData = async () => {
     const [accountsData, loanData] = await Promise.all([apiStorage.getAccounts(), apiStorage.getLoans()])
@@ -61,31 +94,6 @@ export default function LoansPage() {
     accounts.forEach((account) => map.set(account.id, account.name))
     return map
   }, [accounts])
-
-  const handleModelLoan = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setModelError("")
-    setModelResult(null)
-
-    try {
-      setIsModeling(true)
-      const principal = Number(modelPrincipal)
-      const flatRatePercent = Number(modelFlatRate)
-      const durationDays = Number(modelDurationDays)
-
-      const result = await apiStorage.modelSinglePaymentLoan({
-        principal_amount: principal,
-        flat_interest_rate: flatRatePercent / 100,
-        loan_duration_days: durationDays,
-      })
-
-      setModelResult(result)
-    } catch (err) {
-      setModelError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO MODEL LOAN")
-    } finally {
-      setIsModeling(false)
-    }
-  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -140,105 +148,6 @@ export default function LoansPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <div className="bg-card border border-border rounded-lg overflow-hidden">
-              <div className="p-4 border-b border-border">
-                <h2 className="font-mono text-sm text-foreground">SINGLE-PAYMENT LOAN MODEL</h2>
-                <p className="font-mono text-xs text-muted-foreground mt-1">
-                  FLAT INTEREST LOAN WITH ONE REPAYMENT AT DUE DATE
-                </p>
-              </div>
-              <form onSubmit={handleModelLoan} className="p-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="font-mono text-xs text-muted-foreground block mb-2">PRINCIPAL (P)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={modelPrincipal}
-                      onChange={(e) => setModelPrincipal(e.target.value)}
-                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="font-mono text-xs text-muted-foreground block mb-2">FLAT INTEREST (%)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={modelFlatRate}
-                      onChange={(e) => setModelFlatRate(e.target.value)}
-                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="font-mono text-xs text-muted-foreground block mb-2">DURATION (DAYS)</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      value={modelDurationDays}
-                      onChange={(e) => setModelDurationDays(e.target.value)}
-                      className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {modelError && (
-                  <div className="p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
-                    {modelError}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isModeling}
-                  className="px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 disabled:opacity-60"
-                >
-                  {isModeling ? "MODELING..." : "MODEL LOAN"}
-                </button>
-              </form>
-            </div>
-
-            <div className="bg-card border border-border rounded-lg overflow-hidden">
-              <div className="p-4 border-b border-border">
-                <h2 className="font-mono text-sm text-foreground">MODEL OUTPUT</h2>
-                <p className="font-mono text-xs text-muted-foreground mt-1">
-                  JSON FIELDS: TOTAL_DUE, DUE_DATE, EFFECTIVE_APR
-                </p>
-              </div>
-              <div className="p-4 space-y-3">
-                {modelResult ? (
-                  <>
-                    <div className="p-3 bg-secondary/40 border border-border rounded">
-                      <pre className="font-mono text-xs text-foreground whitespace-pre-wrap break-all">
-{JSON.stringify(modelResult, null, 2)}
-                      </pre>
-                    </div>
-
-                    {modelResult.high_priority_debt && (
-                      <div className="p-3 bg-destructive/10 border border-destructive/30 rounded">
-                        <div className="font-mono text-xs text-destructive flex items-center gap-2">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          HIGH-PRIORITY DEBT: APR ABOVE 36%
-                        </div>
-                        <div className="font-mono text-xs text-muted-foreground mt-2">
-                          BUDGET ACTION: CREATE/INCREASE A "LOAN REPAYMENT" ENVELOPE BEFORE {formatDate(modelResult.due_date)}.
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="p-3 bg-secondary/40 border border-border rounded font-mono text-xs text-muted-foreground">
-                    RUN THE MODEL TO SEE REPAYMENT TOTAL, DUE DATE, APR, AND PRIORITY FLAG.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h2 className="font-mono text-sm text-foreground">ACTIVE AND HISTORICAL LOANS</h2>
@@ -256,6 +165,8 @@ export default function LoansPage() {
                   const outstanding = Number(loan.outstandingPrincipal) || 0
                   const repaid = principal - outstanding
                   const progress = principal > 0 ? Math.min(100, Math.max(0, (repaid / principal) * 100)) : 0
+                  const parsedNotes = parseLoanNotes(loan.notes)
+                  const modeledLoan = parsedNotes.model
 
                   return (
                     <div key={loan.id} className="p-4">
@@ -285,9 +196,37 @@ export default function LoansPage() {
                               {loan.status.toUpperCase()}
                             </span>
                           </div>
-                          <div className="font-mono text-xs text-muted-foreground mt-1">{loan.annualRate}% p.a.</div>
+                          <div className="font-mono text-xs text-muted-foreground mt-1">
+                            {modeledLoan ? "EFFECTIVE APR" : "ANNUAL RATE"}: {loan.annualRate}%
+                          </div>
                         </div>
                       </div>
+
+                      {modeledLoan && (
+                        <div className="mt-3 p-3 bg-secondary/40 border border-border rounded">
+                          <div className="font-mono text-xs text-muted-foreground mb-2">SINGLE-PAYMENT MODEL OUTPUT</div>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                            <div className="font-mono text-xs text-foreground">
+                              TOTAL DUE: {formatCurrency(modeledLoan.total_due)}
+                            </div>
+                            <div className="font-mono text-xs text-foreground">
+                              FLAT RATE: {(modeledLoan.flat_interest_rate * 100).toFixed(2)}%
+                            </div>
+                            <div className="font-mono text-xs text-foreground">
+                              DURATION: {modeledLoan.loan_duration_days} DAYS
+                            </div>
+                            <div className="font-mono text-xs text-foreground">
+                              FIXED INTEREST: {formatCurrency(modeledLoan.total_due - principal)}
+                            </div>
+                          </div>
+                          {modeledLoan.high_priority_debt && (
+                            <div className="mt-2 font-mono text-xs text-destructive flex items-center gap-2">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              HIGH-PRIORITY DEBT (APR ABOVE 36%)
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="p-3 bg-secondary/40 border border-border rounded">
@@ -326,6 +265,13 @@ export default function LoansPage() {
                           EDIT TERMS
                         </button>
                       </div>
+
+                      {parsedNotes.plainNotes && (
+                        <div className="mt-3 p-3 bg-secondary/20 border border-border rounded">
+                          <div className="font-mono text-xs text-muted-foreground mb-1">NOTES</div>
+                          <div className="font-mono text-xs text-foreground whitespace-pre-wrap">{parsedNotes.plainNotes}</div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -376,6 +322,8 @@ function LoanModal({
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
+  const parsedLoanNotes = parseLoanNotes(loan?.notes)
+  const existingModel = parsedLoanNotes.model
   const [lenderName, setLenderName] = useState(loan?.lenderName || "")
   const [accountId, setAccountId] = useState(loan?.accountId || accounts[0]?.id || "")
   const [principal, setPrincipal] = useState(loan ? String(loan.principal) : "")
@@ -383,32 +331,91 @@ function LoanModal({
   const [startDate, setStartDate] = useState(loan?.startDate || new Date().toISOString().split("T")[0])
   const [dueDate, setDueDate] = useState(loan?.dueDate || new Date().toISOString().split("T")[0])
   const [status, setStatus] = useState<Loan["status"]>(loan?.status || "active")
-  const [notes, setNotes] = useState(loan?.notes || "")
+  const [notes, setNotes] = useState(parsedLoanNotes.plainNotes)
+  const [loanType, setLoanType] = useState<"standard" | "single-payment">(existingModel ? "single-payment" : "standard")
+  const [flatInterestRatePercent, setFlatInterestRatePercent] = useState(
+    existingModel ? String(existingModel.flat_interest_rate * 100) : ""
+  )
+  const [loanDurationDays, setLoanDurationDays] = useState(existingModel ? String(existingModel.loan_duration_days) : "")
+  const [modelResult, setModelResult] = useState<LoanModelResult | null>(
+    existingModel
+      ? {
+          total_due: existingModel.total_due,
+          due_date: loan?.dueDate || new Date().toISOString().split("T")[0],
+          effective_apr: existingModel.effective_apr,
+          high_priority_debt: existingModel.high_priority_debt,
+        }
+      : null
+  )
+  const [isModeling, setIsModeling] = useState(false)
   const [error, setError] = useState("")
   const isEdit = !!loan
+
+  const handleRunModel = async () => {
+    setError("")
+    setModelResult(null)
+    try {
+      setIsModeling(true)
+      const result = await apiStorage.modelSinglePaymentLoan({
+        principal_amount: Number(principal),
+        flat_interest_rate: Number(flatInterestRatePercent) / 100,
+        loan_duration_days: Number(loanDurationDays),
+        start_date: startDate,
+      })
+
+      setModelResult(result)
+      setDueDate(result.due_date)
+      setAnnualRate(String(result.effective_apr))
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO MODEL LOAN")
+    } finally {
+      setIsModeling(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
     try {
+      const isSinglePayment = loanType === "single-payment"
+      if (isSinglePayment && !modelResult) {
+        throw new Error("Run the single-payment model before saving this loan")
+      }
+
+      const storedModel: StoredLoanModel | null =
+        isSinglePayment && modelResult
+          ? {
+              kind: "single-payment",
+              flat_interest_rate: Number(flatInterestRatePercent) / 100,
+              loan_duration_days: Number(loanDurationDays),
+              total_due: Number(modelResult.total_due),
+              effective_apr: Number(modelResult.effective_apr),
+              high_priority_debt: Boolean(modelResult.high_priority_debt),
+            }
+          : null
+
+      const combinedNotes = composeLoanNotes(notes, storedModel)
+      const effectiveRate = isSinglePayment && modelResult ? Number(modelResult.effective_apr) : Number(annualRate)
+      const effectiveDueDate = isSinglePayment && modelResult ? modelResult.due_date : dueDate
+
       if (isEdit && loan) {
         await apiStorage.updateLoan(loan.id, {
           lenderName,
-          annualRate: Number(annualRate),
-          dueDate,
+          annualRate: effectiveRate,
+          dueDate: effectiveDueDate,
           status,
-          notes,
+          notes: combinedNotes,
         })
       } else {
         await apiStorage.addLoan({
           lenderName,
           accountId,
           principal: Number(principal),
-          annualRate: Number(annualRate),
+          annualRate: effectiveRate,
           startDate,
-          dueDate,
-          notes,
+          dueDate: effectiveDueDate,
+          notes: combinedNotes,
         })
       }
 
@@ -428,6 +435,25 @@ function LoanModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          <div>
+            <label className="font-mono text-xs text-muted-foreground block mb-2">LOAN TYPE</label>
+            <select
+              value={loanType}
+              onChange={(e) => {
+                const nextType = e.target.value as "standard" | "single-payment"
+                setLoanType(nextType)
+                if (nextType === "standard") {
+                  setModelResult(null)
+                }
+              }}
+              disabled={isEdit}
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
+            >
+              <option value="standard">STANDARD LOAN</option>
+              <option value="single-payment">SINGLE-PAYMENT (FLAT INTEREST)</option>
+            </select>
+          </div>
+
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">LENDER NAME</label>
             <input
@@ -467,16 +493,77 @@ function LoanModal({
               />
             </div>
             <div>
-              <label className="font-mono text-xs text-muted-foreground block mb-2">ANNUAL RATE (%)</label>
+              <label className="font-mono text-xs text-muted-foreground block mb-2">
+                {loanType === "single-payment" ? "EFFECTIVE APR (%)" : "ANNUAL RATE (%)"}
+              </label>
               <input
                 type="number"
                 step="0.01"
                 value={annualRate}
                 onChange={(e) => setAnnualRate(e.target.value)}
-                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                disabled={loanType === "single-payment"}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
               />
             </div>
           </div>
+
+          {loanType === "single-payment" && (
+            <div className="p-3 bg-secondary/30 border border-border rounded space-y-3">
+              <div className="font-mono text-xs text-muted-foreground">SINGLE-PAYMENT MODEL INPUTS</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="font-mono text-xs text-muted-foreground block mb-2">FLAT INTEREST (%)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={flatInterestRatePercent}
+                    onChange={(e) => setFlatInterestRatePercent(e.target.value)}
+                    disabled={isEdit}
+                    className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="font-mono text-xs text-muted-foreground block mb-2">DURATION (DAYS)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={loanDurationDays}
+                    onChange={(e) => setLoanDurationDays(e.target.value)}
+                    disabled={isEdit}
+                    className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              {!isEdit && (
+                <button
+                  type="button"
+                  onClick={() => void handleRunModel()}
+                  disabled={isModeling}
+                  className="px-3 py-2 bg-primary text-primary-foreground font-mono text-xs rounded hover:bg-primary/90 disabled:opacity-60"
+                >
+                  {isModeling ? "MODELING..." : "RUN MODEL"}
+                </button>
+              )}
+
+              {modelResult && (
+                <div className="p-3 bg-background/40 border border-border rounded">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <div className="font-mono text-xs text-foreground">TOTAL DUE: {formatCurrency(modelResult.total_due)}</div>
+                    <div className="font-mono text-xs text-foreground">DUE DATE: {formatDate(modelResult.due_date)}</div>
+                    <div className="font-mono text-xs text-foreground">EFFECTIVE APR: {modelResult.effective_apr}%</div>
+                  </div>
+                  {modelResult.high_priority_debt && (
+                    <div className="mt-2 font-mono text-xs text-destructive flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      HIGH-PRIORITY DEBT (APR ABOVE 36%)
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -495,7 +582,8 @@ function LoanModal({
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                disabled={loanType === "single-payment"}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
               />
             </div>
           </div>
