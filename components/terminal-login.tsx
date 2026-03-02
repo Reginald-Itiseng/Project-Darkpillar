@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { getUser, setUser, setAuthenticated, initializeData } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import type { User } from "@/lib/types"
 
 const BOOT_SEQUENCE = [
@@ -43,15 +43,16 @@ export function TerminalLogin() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    initializeData()
-
-    // Check if user exists
-    const existingUser = getUser()
-    if (existingUser) {
-      setMode("login")
-    } else {
-      setMode("register")
+    // Check if user is already authenticated
+    const checkExistingAuth = async () => {
+      const existingUser = await apiStorage.verifySession()
+      if (existingUser) {
+        // User already logged in, redirect to dashboard
+        router.push("/dashboard")
+      }
     }
+
+    checkExistingAuth()
 
     // Boot sequence animation
     let currentLine = 0
@@ -66,7 +67,7 @@ export function TerminalLogin() {
     }, 80)
 
     return () => clearInterval(bootInterval)
-  }, [])
+  }, [router])
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -85,54 +86,36 @@ export function TerminalLogin() {
     setError("")
     setIsProcessing(true)
 
-    // Simulate processing delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      if (mode === "register") {
+        if (username.length < 3) {
+          setError("ERROR: AGENT DESIGNATION MUST BE AT LEAST 3 CHARACTERS")
+          setIsProcessing(false)
+          return
+        }
+        if (pin.length < 4) {
+          setError("ERROR: ACCESS CODE MUST BE AT LEAST 4 DIGITS")
+          setIsProcessing(false)
+          return
+        }
+        if (pin !== confirmPIN) {
+          setError("ERROR: ACCESS CODES DO NOT MATCH")
+          setIsProcessing(false)
+          return
+        }
 
-    if (mode === "register") {
-      if (username.length < 3) {
-        setError("ERROR: AGENT DESIGNATION MUST BE AT LEAST 3 CHARACTERS")
-        setIsProcessing(false)
-        return
+        const { user } = await apiStorage.register(username.toLowerCase(), username.toUpperCase(), pin)
+        apiStorage.setCurrentUser(user)
+        router.push("/dashboard")
+      } else {
+        const { user } = await apiStorage.login(username.toLowerCase(), pin)
+        apiStorage.setCurrentUser(user)
+        router.push("/dashboard")
       }
-      if (pin.length < 4) {
-        setError("ERROR: ACCESS CODE MUST BE AT LEAST 4 DIGITS")
-        setIsProcessing(false)
-        return
-      }
-      if (pin !== confirmPIN) {
-        setError("ERROR: ACCESS CODES DO NOT MATCH")
-        setIsProcessing(false)
-        return
-      }
-
-      const newUser: User = {
-        id: crypto.randomUUID(),
-        username: username.toUpperCase(),
-        pin,
-        clearanceLevel: 4,
-        createdAt: new Date().toISOString(),
-      }
-
-      setUser(newUser)
-      setAuthenticated(true)
-      router.push("/dashboard")
-    } else {
-      const user = getUser()
-      if (!user) {
-        setError("ERROR: NO AGENT PROFILE FOUND. INITIATING REGISTRATION...")
-        setMode("register")
-        setIsProcessing(false)
-        return
-      }
-
-      if (username.toUpperCase() !== user.username || pin !== user.pin) {
-        setError("ERROR: INVALID CREDENTIALS. ACCESS DENIED.")
-        setIsProcessing(false)
-        return
-      }
-
-      setAuthenticated(true)
-      router.push("/dashboard")
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error occurred"
+      setError(`ERROR: ${errorMessage}`)
+      setIsProcessing(false)
     }
   }
 
@@ -256,17 +239,26 @@ export function TerminalLogin() {
                     {mode === "login" && (
                       <button
                         type="button"
-                        onClick={() => setMode("register")}
+                        onClick={() => {
+                          setMode("register")
+                          setUsername("")
+                          setPIN("")
+                        }}
                         className="text-muted-foreground hover:text-foreground font-mono text-sm"
                       >
                         [NEW AGENT REGISTRATION]
                       </button>
                     )}
 
-                    {mode === "register" && getUser() && (
+                    {mode === "register" && (
                       <button
                         type="button"
-                        onClick={() => setMode("login")}
+                        onClick={() => {
+                          setMode("login")
+                          setUsername("")
+                          setPIN("")
+                          setConfirmPIN("")
+                        }}
                         className="text-muted-foreground hover:text-foreground font-mono text-sm"
                       >
                         [EXISTING AGENT LOGIN]

@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { isAuthenticated, getUser } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -12,17 +12,23 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [isAuthed, setIsAuthed] = useState(false)
 
   useEffect(() => {
-    const checkAuth = () => {
-      const authed = isAuthenticated()
-      const user = getUser()
+    const checkAuth = async () => {
+      try {
+        const user = await apiStorage.verifySession()
 
-      if (!authed || !user) {
+        if (!user) {
+          router.push("/")
+          return
+        }
+
+        apiStorage.setCurrentUser(user)
+        setIsAuthed(true)
+      } catch (error) {
+        console.error("Auth check failed:", error)
         router.push("/")
-        return
+      } finally {
+        setIsLoading(false)
       }
-
-      setIsAuthed(true)
-      setIsLoading(false)
     }
 
     checkAuth()

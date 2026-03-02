@@ -1,0 +1,92 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getCategories, addCategory } from '@/lib/db-financial'
+import { getSessionByToken } from '@/lib/db-auth'
+
+/**
+ * Helper to extract user ID from session
+ */
+async function getUserIdFromRequest(request: NextRequest): Promise<string | null> {
+  const token =
+    request.cookies.get('session_token')?.value ||
+    request.headers.get('Authorization')?.replace('Bearer ', '')
+
+  if (!token) return null
+
+  const session = await getSessionByToken(token)
+  if (!session) return null
+
+  return session.userId
+}
+
+/**
+ * GET /api/financial/categories
+ * Fetch all categories for authenticated user (including default categories)
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const userId = await getUserIdFromRequest(request)
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const categories = await getCategories(userId)
+    return NextResponse.json({ categories }, { status: 200 })
+  } catch (error) {
+    console.error('Error fetching categories:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch categories' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * POST /api/financial/categories
+ * Create a new custom category
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const userId = await getUserIdFromRequest(request)
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const body = await request.json()
+    const { name, type, icon } = body
+
+    // Validation
+    if (!name || !type) {
+      return NextResponse.json(
+        { error: 'Missing required fields: name, type' },
+        { status: 400 }
+      )
+    }
+
+    if (!['income', 'expense'].includes(type)) {
+      return NextResponse.json(
+        { error: 'Invalid category type. Must be "income" or "expense"' },
+        { status: 400 }
+      )
+    }
+
+    const category = await addCategory(userId, {
+      name,
+      type,
+      icon: icon || undefined,
+    })
+
+    return NextResponse.json({ category }, { status: 201 })
+  } catch (error) {
+    console.error('Error creating category:', error)
+    return NextResponse.json(
+      { error: 'Failed to create category' },
+      { status: 500 }
+    )
+  }
+}
