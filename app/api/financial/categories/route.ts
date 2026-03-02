@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCategories, addCategory } from '@/lib/db-financial'
 import { getSessionByToken } from '@/lib/db-auth'
+import { toApiError } from '@/lib/api-error'
+import type { Category } from '@/lib/types'
 
 /**
  * Helper to extract user ID from session
@@ -57,7 +59,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
     const { name, type, icon } = body
 
     // Validation
@@ -68,25 +70,36 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!['income', 'expense'].includes(type)) {
+    if (!['income', 'expense'].includes(String(type))) {
       return NextResponse.json(
         { error: 'Invalid category type. Must be "income" or "expense"' },
         { status: 400 }
       )
     }
 
+    const normalizedName = String(name).trim().toUpperCase()
+    if (normalizedName.length < 2) {
+      return NextResponse.json(
+        { error: 'Category name must be at least 2 characters' },
+        { status: 400 }
+      )
+    }
+
+    const normalizedIcon = icon ? String(icon).trim() : undefined
+
     const category = await addCategory(userId, {
-      name,
-      type,
-      icon: icon || undefined,
+      name: normalizedName,
+      type: type as Category['type'],
+      icon: normalizedIcon || undefined,
     })
 
     return NextResponse.json({ category }, { status: 201 })
   } catch (error) {
     console.error('Error creating category:', error)
+    const { status, message } = toApiError(error, 'Failed to create category')
     return NextResponse.json(
-      { error: 'Failed to create category' },
-      { status: 500 }
+      { error: message },
+      { status }
     )
   }
 }

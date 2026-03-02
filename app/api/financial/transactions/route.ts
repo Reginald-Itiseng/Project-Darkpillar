@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTransactions, addTransaction, deleteTransaction } from '@/lib/db-financial'
 import { getSessionByToken } from '@/lib/db-auth'
+import { toApiError } from '@/lib/api-error'
+import type { Transaction } from '@/lib/types'
+
+function isValidDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
 
 /**
  * Helper to extract user ID from session
@@ -57,7 +65,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
     const { type, amount, category, description, accountId, toAccountId, date } = body
 
     // Validation
@@ -68,28 +76,55 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!['income', 'expense', 'transfer'].includes(type)) {
+    if (!['income', 'expense', 'transfer'].includes(String(type))) {
       return NextResponse.json(
         { error: 'Invalid transaction type' },
         { status: 400 }
       )
     }
 
-    if (Number(amount) <= 0) {
+    const parsedAmount = Number(amount)
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return NextResponse.json(
         { error: 'Amount must be greater than zero' },
         { status: 400 }
       )
     }
 
-    if (type === 'transfer' && !toAccountId) {
+    const normalizedCategory = String(category).trim()
+    const normalizedAccountId = String(accountId).trim()
+    const normalizedToAccountId = toAccountId ? String(toAccountId).trim() : undefined
+    const normalizedDate = String(date).trim()
+
+    if (!normalizedCategory) {
+      return NextResponse.json(
+        { error: 'Category is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!normalizedAccountId) {
+      return NextResponse.json(
+        { error: 'Account ID is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!isValidDateOnly(normalizedDate)) {
+      return NextResponse.json(
+        { error: 'Date must use YYYY-MM-DD format' },
+        { status: 400 }
+      )
+    }
+
+    if (type === 'transfer' && !normalizedToAccountId) {
       return NextResponse.json(
         { error: 'toAccountId is required for transfer transactions' },
         { status: 400 }
       )
     }
 
-    if (type === 'transfer' && accountId === toAccountId) {
+    if (type === 'transfer' && normalizedAccountId === normalizedToAccountId) {
       return NextResponse.json(
         { error: 'Source and destination accounts must be different' },
         { status: 400 }
@@ -97,21 +132,22 @@ export async function POST(request: NextRequest) {
     }
 
     const transaction = await addTransaction(userId, {
-      type,
-      amount: Number(amount),
-      category,
-      description: description || '',
-      accountId,
-      toAccountId,
-      date,
+      type: type as Transaction['type'],
+      amount: parsedAmount,
+      category: normalizedCategory,
+      description: String(description || '').trim().toUpperCase(),
+      accountId: normalizedAccountId,
+      toAccountId: normalizedToAccountId,
+      date: normalizedDate,
     })
 
     return NextResponse.json({ transaction }, { status: 201 })
   } catch (error) {
     console.error('Error creating transaction:', error)
+    const { status, message } = toApiError(error, 'Failed to create transaction')
     return NextResponse.json(
-      { error: 'Failed to create transaction' },
-      { status: 500 }
+      { error: message },
+      { status }
     )
   }
 }
@@ -152,9 +188,10 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (error) {
     console.error('Error deleting transaction:', error)
+    const { status, message } = toApiError(error, 'Failed to delete transaction')
     return NextResponse.json(
-      { error: 'Failed to delete transaction' },
-      { status: 500 }
+      { error: message },
+      { status }
     )
   }
 }

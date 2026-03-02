@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getBudgets, addBudget, updateBudget, deleteBudget } from '@/lib/db-financial'
 import { getSessionByToken } from '@/lib/db-auth'
+import { toApiError } from '@/lib/api-error'
+
+function isValidMonth(value: string): boolean {
+  if (!/^\d{4}-\d{2}$/.test(value)) return false
+  const month = Number(value.slice(5, 7))
+  return month >= 1 && month <= 12
+}
 
 /**
  * Helper to extract user ID from session
@@ -57,7 +64,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
     const { category, amount, month } = body
 
     // Validation
@@ -68,15 +75,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (Number(amount) <= 0) {
+    const parsedAmount = Number(amount)
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return NextResponse.json(
         { error: 'Amount must be greater than zero' },
         { status: 400 }
       )
     }
 
-    // Validate month format (YYYY-MM)
-    if (!/^\d{4}-\d{2}$/.test(month)) {
+    const normalizedCategory = String(category).trim()
+    const normalizedMonth = String(month).trim()
+
+    if (!normalizedCategory) {
+      return NextResponse.json(
+        { error: 'Category is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!isValidMonth(normalizedMonth)) {
       return NextResponse.json(
         { error: 'Invalid month format. Use YYYY-MM' },
         { status: 400 }
@@ -84,9 +101,9 @@ export async function POST(request: NextRequest) {
     }
 
     const budget = await addBudget(userId, {
-      category,
-      amount: Number(amount),
-      month,
+      category: normalizedCategory,
+      amount: parsedAmount,
+      month: normalizedMonth,
     })
 
     return NextResponse.json({ budget }, { status: 201 })
@@ -99,9 +116,10 @@ export async function POST(request: NextRequest) {
     }
 
     console.error('Error creating budget:', error)
+    const { status, message } = toApiError(error, 'Failed to create budget')
     return NextResponse.json(
-      { error: 'Failed to create budget' },
-      { status: 500 }
+      { error: message },
+      { status }
     )
   }
 }
@@ -130,17 +148,18 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
     const { amount } = body
 
-    if (amount === undefined || amount === null || Number(amount) <= 0) {
+    const parsedAmount = Number(amount)
+    if (amount === undefined || amount === null || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return NextResponse.json(
         { error: 'Amount must be greater than zero' },
         { status: 400 }
       )
     }
 
-    const budget = await updateBudget(userId, budgetId, { amount: Number(amount) })
+    const budget = await updateBudget(userId, budgetId, { amount: parsedAmount })
 
     if (!budget) {
       return NextResponse.json(
@@ -152,9 +171,10 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ budget }, { status: 200 })
   } catch (error) {
     console.error('Error updating budget:', error)
+    const { status, message } = toApiError(error, 'Failed to update budget')
     return NextResponse.json(
-      { error: 'Failed to update budget' },
-      { status: 500 }
+      { error: message },
+      { status }
     )
   }
 }
@@ -195,9 +215,10 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (error) {
     console.error('Error deleting budget:', error)
+    const { status, message } = toApiError(error, 'Failed to delete budget')
     return NextResponse.json(
-      { error: 'Failed to delete budget' },
-      { status: 500 }
+      { error: message },
+      { status }
     )
   }
 }
