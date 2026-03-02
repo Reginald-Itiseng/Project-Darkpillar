@@ -1,5 +1,6 @@
 import { query } from './db'
 import type { User } from './types'
+import crypto from 'crypto'
 
 interface AdminCheckRow {
   isAdmin: boolean
@@ -26,6 +27,10 @@ interface LinkSourceUser {
   name: string | null
   email: string | null
   clearanceLevel: number
+}
+
+interface PasswordHashRow {
+  password: string | null
 }
 
 let publicUsersColumnsCache: PublicUsersColumn[] | null = null
@@ -413,6 +418,20 @@ export async function ensureFinancialUserLink(userId: string): Promise<void> {
       throw linkageError('Authenticated user record not found in neon_auth.user.')
     }
 
+    const passwordResult = await query<PasswordHashRow>(
+      `
+      SELECT password
+      FROM neon_auth.account
+      WHERE "userId" = $1 AND "providerId" = 'password'
+      ORDER BY "updatedAt" DESC
+      LIMIT 1
+      `,
+      [userId]
+    )
+
+    const fallbackPin = crypto.randomBytes(24).toString('hex')
+    const hashedPin = passwordResult.rows[0]?.password || fallbackPin
+
     const nowIso = new Date().toISOString()
     const valueByColumn: Record<string, unknown> = {
       id: sourceUser.id,
@@ -422,6 +441,10 @@ export async function ensureFinancialUserLink(userId: string): Promise<void> {
       email: sourceUser.email,
       clearance_level: sourceUser.clearanceLevel,
       clearanceLevel: sourceUser.clearanceLevel,
+      pin: hashedPin,
+      password: hashedPin,
+      pin_hash: hashedPin,
+      password_hash: hashedPin,
       created_at: nowIso,
       createdAt: nowIso,
       updated_at: nowIso,
