@@ -9,6 +9,50 @@ export interface AdminInvite {
   createdAt: string
 }
 
+function toNumber(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function normalizeAccount(raw: any): Account {
+  return {
+    ...raw,
+    balance: toNumber(raw?.balance),
+    interestRate: toOptionalNumber(raw?.interestRate),
+    depositDate: raw?.depositDate || undefined,
+    maturityDate: raw?.maturityDate || undefined,
+  } as Account
+}
+
+function normalizeTransaction(raw: any): Transaction {
+  return {
+    ...raw,
+    amount: toNumber(raw?.amount),
+  } as Transaction
+}
+
+function normalizeBudget(raw: any): Budget {
+  return {
+    ...raw,
+    amount: toNumber(raw?.amount),
+    spent: toNumber(raw?.spent),
+  } as Budget
+}
+
+function normalizeGoal(raw: any): Goal {
+  return {
+    ...raw,
+    targetAmount: toNumber(raw?.targetAmount),
+    currentAmount: toNumber(raw?.currentAmount),
+  } as Goal
+}
+
 function getSessionToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('session_token')
@@ -156,7 +200,7 @@ export async function getAccounts(): Promise<Account[]> {
 
     if (!response.ok) return []
     const data = await response.json()
-    return data.accounts || []
+    return (data.accounts || []).map(normalizeAccount)
   } catch {
     return []
   }
@@ -175,7 +219,7 @@ export async function addAccount(account: Omit<Account, 'id' | 'createdAt'>): Pr
   }
 
   const data = await response.json()
-  return data.account
+  return normalizeAccount(data.account)
 }
 
 export async function updateAccount(id: string, updates: Partial<Account>): Promise<Account> {
@@ -191,7 +235,7 @@ export async function updateAccount(id: string, updates: Partial<Account>): Prom
   }
 
   const data = await response.json()
-  return data.account
+  return normalizeAccount(data.account)
 }
 
 // ============================================================================
@@ -208,7 +252,7 @@ export async function getTransactions(): Promise<Transaction[]> {
 
     if (!response.ok) return []
     const data = await response.json()
-    return data.transactions || []
+    return (data.transactions || []).map(normalizeTransaction)
   } catch {
     return []
   }
@@ -227,7 +271,7 @@ export async function addTransaction(transaction: Omit<Transaction, 'id' | 'crea
   }
 
   const data = await response.json()
-  return data.transaction
+  return normalizeTransaction(data.transaction)
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
@@ -256,7 +300,7 @@ export async function getBudgets(): Promise<Budget[]> {
 
     if (!response.ok) return []
     const data = await response.json()
-    return data.budgets || []
+    return (data.budgets || []).map(normalizeBudget)
   } catch {
     return []
   }
@@ -275,7 +319,7 @@ export async function addBudget(budget: Omit<Budget, 'id' | 'createdAt' | 'spent
   }
 
   const data = await response.json()
-  return data.budget
+  return normalizeBudget(data.budget)
 }
 
 export async function updateBudget(id: string, updates: Partial<Budget>): Promise<Budget> {
@@ -291,7 +335,7 @@ export async function updateBudget(id: string, updates: Partial<Budget>): Promis
   }
 
   const data = await response.json()
-  return data.budget
+  return normalizeBudget(data.budget)
 }
 
 export async function deleteBudget(id: string): Promise<void> {
@@ -320,7 +364,7 @@ export async function getGoals(): Promise<Goal[]> {
 
     if (!response.ok) return []
     const data = await response.json()
-    return data.goals || []
+    return (data.goals || []).map(normalizeGoal)
   } catch {
     return []
   }
@@ -339,7 +383,7 @@ export async function addGoal(goal: Omit<Goal, 'id' | 'createdAt'>): Promise<Goa
   }
 
   const data = await response.json()
-  return data.goal
+  return normalizeGoal(data.goal)
 }
 
 export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Goal> {
@@ -355,7 +399,7 @@ export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Go
   }
 
   const data = await response.json()
-  return data.goal
+  return normalizeGoal(data.goal)
 }
 
 export async function deleteGoal(id: string): Promise<void> {
