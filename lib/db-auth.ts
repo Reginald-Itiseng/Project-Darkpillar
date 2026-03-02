@@ -1,6 +1,20 @@
 import { query } from './db'
 import type { User } from './types'
 
+interface AdminCheckRow {
+  isAdmin: boolean
+}
+
+interface RegistrationInvite {
+  id: string
+  maxUses: number
+  usesCount: number
+  expiresAt: string | null
+  isActive: boolean
+  createdAt: string
+  createdBy: string
+}
+
 /**
  * Get user by ID from neon_auth.user
  */
@@ -49,6 +63,27 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     return result.rows[0] || null
   } catch (error) {
     console.error('Error fetching user by email:', error)
+    throw error
+  }
+}
+
+/**
+ * Check whether a user has administrator privileges.
+ */
+export async function isAdminUser(userId: string): Promise<boolean> {
+  try {
+    const result = await query<AdminCheckRow>(
+      `
+      SELECT (COALESCE(clearance_level, 0) >= 4) as "isAdmin"
+      FROM neon_auth."user"
+      WHERE id = $1
+      `,
+      [userId]
+    )
+
+    return result.rows[0]?.isAdmin === true
+  } catch (error) {
+    console.error('Error checking admin privileges:', error)
     throw error
   }
 }
@@ -284,5 +319,106 @@ export async function cleanupAuthUser(userId: string): Promise<void> {
     await query(`DELETE FROM neon_auth."user" WHERE id = $1`, [userId])
   } catch (error) {
     console.error('Error cleaning up auth user:', error)
+  }
+}
+
+/**
+ * Create an invite code record (hashed code only).
+ */
+export async function createRegistrationInvite(
+  createdByUserId: string,
+  codeHash: string,
+  maxUses: number,
+  expiresAt: Date | null
+): Promise<RegistrationInvite> {
+  try {
+    const result = await query<RegistrationInvite>(
+      `
+      INSERT INTO public.registration_invites (
+        id,
+        code_hash,
+        created_by,
+        max_uses,
+        uses_count,
+        expires_at,
+        is_active,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        $1,
+        $2,
+        $3,
+        0,
+        $4,
+        true,
+        NOW(),
+        NOW()
+      )
+      RETURNING
+        id,
+        max_uses as "maxUses",
+        uses_count as "usesCount",
+        expires_at as "expiresAt",
+        is_active as "isActive",
+        created_at as "createdAt",
+        created_by as "createdBy"
+      `,
+      [codeHash, createdByUserId, maxUses, expiresAt]
+    )
+
+    if (!result.rows[0]) {
+      throw new Error('Failed to create registration invite')
+    }
+
+    return result.rows[0]
+  } catch (error) {
+    console.error('Error creating registration invite:', error)
+    throw error
+  }
+}
+
+/**
+ * Atomically consume one invite usage for a newly created user.
+ */
+export async function consumeRegistrationInvite(
+  codeHash: string,
+  usedByUserId: string
+): Promise<boolean> {
+  try {
+    const result = await query(
+      `
+      WITH updated AS (
+        UPDATE public.registration_invites
+        SET uses_count = uses_count + 1, updated_at = NOW()
+        WHERE
+          code_hash = $1
+          AND is_active = true
+          AND (expires_at IS NULL OR expires_at > NOW())
+          AND uses_count < max_uses
+        RETURNING id
+      )
+      INSERT INTO public.registration_invite_usages (
+        id,
+        invite_id,
+        used_by,
+        used_at
+      )
+      SELECT
+        gen_random_uuid(),
+        id,
+        $2,
+        NOW()
+      FROM updated
+      RETURNING id
+      `,
+      [codeHash, usedByUserId]
+    )
+
+    return (result.rowCount || 0) > 0
+  } catch (error) {
+    console.error('Error consuming registration invite:', error)
+    throw error
   }
 }

@@ -51,6 +51,7 @@ POST /api/auth/register
 POST /api/auth/login
 POST /api/auth/logout
 GET /api/auth/verify
+POST /api/admin/invites
 ```
 
 ### Financial Operations
@@ -80,6 +81,7 @@ POST   /api/financial/categories
 ## Authentication Flow
 
 1. **Register**: User creates account with email, name, and PIN
+   - Requires a valid invite code from an administrator
    - PIN is hashed using PBKDF2
    - User stored in `neon_auth.user`
    - Session token returned
@@ -141,6 +143,7 @@ await apiStorage.addCategory(categoryData)
 - [ ] DATABASE_URL is set in environment variables
 - [ ] Neon database is accessible
 - [ ] All database tables exist with RLS enabled
+- [ ] Invite tables exist (`registration_invites`, `registration_invite_usages`)
 
 ### 2. Authentication Flow
 - [ ] Register new user works
@@ -226,6 +229,8 @@ app/api/
     login/route.ts      - Login endpoint
     logout/route.ts     - Logout endpoint
     verify/route.ts     - Session verification endpoint
+  admin/
+    invites/route.ts    - Admin invite generation endpoint
   financial/
     accounts/route.ts   - Accounts endpoints
     transactions/route.ts - Transactions endpoints
@@ -237,3 +242,27 @@ components/
   auth-guard.tsx        - Protected route wrapper
   terminal-login.tsx    - Login/register UI
 ```
+
+## Invite-Only Registration Setup
+
+Run this migration in Neon SQL editor:
+
+```sql
+-- from scripts/02-registration-invites.sql
+```
+
+As admin, generate invite codes while logged in:
+
+```js
+fetch('/api/admin/invites', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ maxUses: 1, expiresInDays: 14 }),
+})
+  .then((r) => r.json())
+  .then(console.log)
+```
+
+The response includes the one-time invite `code` you share with a user.
+
+Admin check uses `neon_auth.user.clearance_level >= 4`.

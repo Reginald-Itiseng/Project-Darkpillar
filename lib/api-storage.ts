@@ -33,12 +33,17 @@ async function parseErrorMessage(response: Response, fallback: string): Promise<
 // AUTHENTICATION
 // ============================================================================
 
-export async function register(email: string, name: string, pin: string): Promise<{ user: User; token: string }> {
+export async function register(
+  email: string,
+  name: string,
+  pin: string,
+  inviteCode: string
+): Promise<{ user: User; token: string }> {
   const response = await fetch('/api/auth/register', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, pin }),
+    body: JSON.stringify({ email, name, pin, inviteCode }),
   })
 
   if (!response.ok) {

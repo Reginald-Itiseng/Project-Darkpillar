@@ -5,7 +5,6 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import * as apiStorage from "@/lib/api-storage"
-import type { User } from "@/lib/types"
 
 const BOOT_SEQUENCE = [
   "INITIALIZING SCP FOUNDATION FINANCIAL CONTAINMENT SYSTEM...",
@@ -37,6 +36,7 @@ export function TerminalLogin() {
   const [username, setUsername] = useState("")
   const [pin, setPIN] = useState("")
   const [confirmPIN, setConfirmPIN] = useState("")
+  const [inviteCode, setInviteCode] = useState("")
   const [error, setError] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -103,8 +103,18 @@ export function TerminalLogin() {
           setIsProcessing(false)
           return
         }
+        if (!inviteCode.trim()) {
+          setError("ERROR: INVITE CODE REQUIRED")
+          setIsProcessing(false)
+          return
+        }
 
-        const { user } = await apiStorage.register(username.toLowerCase(), username.toUpperCase(), pin)
+        const { user } = await apiStorage.register(
+          username.toLowerCase(),
+          username.toUpperCase(),
+          pin,
+          inviteCode.trim().toUpperCase(),
+        )
         apiStorage.setCurrentUser(user)
         router.push("/dashboard")
       } else {
@@ -225,6 +235,21 @@ export function TerminalLogin() {
                     </div>
                   )}
 
+                  {mode === "register" && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-primary">INVITE_CODE:</span>
+                      <input
+                        type="text"
+                        value={inviteCode}
+                        onChange={(e) => setInviteCode(e.target.value)}
+                        className="flex-1 bg-transparent border-none outline-none text-foreground font-mono uppercase"
+                        placeholder="INV-XXXXXX"
+                        disabled={isProcessing}
+                        autoComplete="off"
+                      />
+                    </div>
+                  )}
+
                   {error && <div className="text-destructive animate-pulse">{error}</div>}
 
                   <div className="pt-4 flex items-center gap-4">
@@ -243,6 +268,8 @@ export function TerminalLogin() {
                           setMode("register")
                           setUsername("")
                           setPIN("")
+                          setConfirmPIN("")
+                          setInviteCode("")
                         }}
                         className="text-muted-foreground hover:text-foreground font-mono text-sm"
                       >
@@ -258,6 +285,7 @@ export function TerminalLogin() {
                           setUsername("")
                           setPIN("")
                           setConfirmPIN("")
+                          setInviteCode("")
                         }}
                         className="text-muted-foreground hover:text-foreground font-mono text-sm"
                       >
