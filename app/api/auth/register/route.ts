@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createUser, storePasswordHash, createSession } from '@/lib/db-auth'
+import { createUser, storePasswordHash, createSession, cleanupAuthUser, getUserByEmail } from '@/lib/db-auth'
 import crypto from 'crypto'
 
 /**
@@ -15,6 +15,8 @@ function generateSessionToken(): string {
 }
 
 export async function POST(request: NextRequest) {
+  let createdUserId: string | null = null
+
   try {
     const body = await request.json()
     const { email, name, pin } = body
@@ -41,11 +43,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Normalize login key to match client behavior.
+    const normalizedEmail = String(email).trim().toLowerCase()
+    const normalizedName = String(name).trim().toUpperCase()
+
+    const existingUser = await getUserByEmail(normalizedEmail)
+    if (existingUser) {
+      return NextResponse.json(
+        { error: 'Email already registered' },
+        { status: 409 }
+      )
+    }
+
     // Create user
     const userId = crypto.randomUUID()
+    createdUserId = userId
     const hashedPin = hashPassword(pin)
 
-    const user = await createUser(userId, email, name, 0)
+    const user = await createUser(userId, normalizedEmail, normalizedName, 0)
     await storePasswordHash(userId, hashedPin)
 
     // Create session immediately after registration
@@ -80,6 +95,10 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error) {
+    if (createdUserId) {
+      await cleanupAuthUser(createdUserId)
+    }
+
     console.error('Registration error:', error)
 
     // Handle duplicate email

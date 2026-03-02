@@ -216,6 +216,12 @@ export async function storePasswordHash(
   try {
     await query(
       `
+      WITH updated AS (
+        UPDATE neon_auth.account
+        SET password = $2, "updatedAt" = NOW()
+        WHERE "userId" = $1 AND "providerId" = 'password'
+        RETURNING id
+      )
       INSERT INTO neon_auth.account (
         id,
         "userId",
@@ -225,7 +231,7 @@ export async function storePasswordHash(
         "createdAt",
         "updatedAt"
       )
-      VALUES (
+      SELECT
         gen_random_uuid(),
         $1,
         'password',
@@ -233,9 +239,7 @@ export async function storePasswordHash(
         $2,
         NOW(),
         NOW()
-      )
-      ON CONFLICT ("userId", "providerId")
-      DO UPDATE SET password = $2, "updatedAt" = NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM updated)
       `,
       [userId, passwordHash]
     )
@@ -257,6 +261,8 @@ export async function getPasswordHash(userId: string): Promise<string | null> {
       SELECT password
       FROM neon_auth.account
       WHERE "userId" = $1 AND "providerId" = 'password'
+      ORDER BY "updatedAt" DESC
+      LIMIT 1
       `,
       [userId]
     )
@@ -265,5 +271,18 @@ export async function getPasswordHash(userId: string): Promise<string | null> {
   } catch (error) {
     console.error('Error fetching password hash:', error)
     throw error
+  }
+}
+
+/**
+ * Best-effort cleanup for partially created auth records.
+ */
+export async function cleanupAuthUser(userId: string): Promise<void> {
+  try {
+    await query(`DELETE FROM neon_auth.session WHERE "userId" = $1`, [userId])
+    await query(`DELETE FROM neon_auth.account WHERE "userId" = $1`, [userId])
+    await query(`DELETE FROM neon_auth."user" WHERE id = $1`, [userId])
+  } catch (error) {
+    console.error('Error cleaning up auth user:', error)
   }
 }
