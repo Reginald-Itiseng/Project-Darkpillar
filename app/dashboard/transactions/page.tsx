@@ -8,7 +8,7 @@ import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
 import type { Transaction, Account, Category } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth } from "@/lib/utils"
-import { Plus, TrendingUp, TrendingDown, ArrowLeftRight, Filter, X, Search, AlertCircle } from "lucide-react"
+import { Plus, TrendingUp, TrendingDown, ArrowLeftRight, Filter, X, Search, AlertCircle, Trash2 } from "lucide-react"
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -57,6 +57,15 @@ export default function TransactionsPage() {
 
   const getAccountName = (id: string) => {
     return accounts.find((a) => a.id === id)?.name || "UNKNOWN"
+  }
+
+  const handleDelete = async (transactionId: string) => {
+    if (!confirm("CONFIRM TRANSACTION DELETION? BALANCES AND BUDGETS WILL BE REVERSED.")) {
+      return
+    }
+
+    await apiStorage.deleteTransaction(transactionId)
+    await loadData()
   }
 
   return (
@@ -236,6 +245,15 @@ export default function TransactionsPage() {
                         {formatCurrency(transaction.amount)}
                       </div>
                       <div className="font-mono text-xs text-muted-foreground">{formatDate(transaction.date)}</div>
+                      <div className="mt-1 flex justify-end">
+                        <button
+                          onClick={() => void handleDelete(transaction.id)}
+                          className="p-1 hover:bg-destructive/10 rounded transition-colors"
+                          title="Delete transaction"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

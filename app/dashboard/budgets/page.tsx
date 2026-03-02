@@ -35,31 +35,8 @@ export default function BudgetsPage() {
   }
 
   useEffect(() => {
-    const bootstrap = async () => {
-      await loadData()
-      await recalculateSpent()
-    }
-
-    void bootstrap()
+    void loadData()
   }, [])
-
-  // Recalculate spent amounts based on transactions
-  const recalculateSpent = async () => {
-    const [transactions, allBudgets] = await Promise.all([apiStorage.getTransactions(), apiStorage.getBudgets()])
-
-    const updatedBudgets = await Promise.all(allBudgets.map(async (budget) => {
-      const spent = transactions
-        .filter((t) => t.type === "expense" && t.category === budget.category && t.date.startsWith(budget.month))
-        .reduce((sum, t) => sum + t.amount, 0)
-
-      if (spent !== budget.spent) {
-        return apiStorage.updateBudget(budget.id, { spent })
-      }
-      return budget
-    }))
-
-    setBudgets(updatedBudgets)
-  }
 
   const monthBudgets = budgets.filter((b) => b.month === selectedMonth)
   const totalBudgeted = monthBudgets.reduce((sum, b) => sum + b.amount, 0)

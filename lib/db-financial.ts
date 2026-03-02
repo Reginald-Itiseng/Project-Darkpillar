@@ -107,12 +107,23 @@ export async function updateAccount(
   updates: Partial<Account>
 ): Promise<Account | null> {
   try {
-    const setClause = Object.entries(updates)
-      .filter(([key]) => key !== 'id' && key !== 'createdAt')
-      .map(([key], index) => {
-        const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase()
-        return `${dbKey} = $${index + 2}`
-      })
+    const allowedFields: Record<string, string> = {
+      name: 'name',
+      type: 'type',
+      balance: 'balance',
+      interestRate: 'interest_rate',
+      maturityDate: 'maturity_date',
+      depositDate: 'deposit_date',
+      isActive: 'is_active',
+      isPrimary: 'is_primary',
+    }
+
+    const filteredEntries = Object.entries(updates).filter(
+      ([key, value]) => key in allowedFields && value !== undefined
+    )
+
+    const setClause = filteredEntries
+      .map(([key], index) => `${allowedFields[key]} = $${index + 2}`)
       .join(', ')
 
     if (!setClause) return null
@@ -121,7 +132,7 @@ export async function updateAccount(
       `
       UPDATE public.accounts
       SET ${setClause}
-      WHERE id = $1 AND user_id = $${Object.keys(updates).length + 1}
+      WHERE id = $1 AND user_id = $${filteredEntries.length + 2}
       RETURNING 
         id,
         name,
@@ -134,7 +145,7 @@ export async function updateAccount(
         is_primary as "isPrimary",
         created_at as "createdAt"
       `,
-      [accountId, ...Object.values(updates), userId],
+      [accountId, ...filteredEntries.map(([, value]) => value), userId],
       userId
     )
 
@@ -273,6 +284,69 @@ export async function addTransaction(
   }, userId)
 }
 
+export async function deleteTransaction(userId: string, transactionId: string): Promise<boolean> {
+  return transaction(async (client) => {
+    const existing = await client.query<Transaction>(
+      `
+      SELECT
+        id,
+        type,
+        amount,
+        category,
+        account_id as "accountId",
+        to_account_id as "toAccountId",
+        date
+      FROM public.transactions
+      WHERE id = $1 AND user_id = $2
+      FOR UPDATE
+      `,
+      [transactionId, userId]
+    )
+
+    const trans = existing.rows[0]
+    if (!trans) return false
+
+    // Reverse the balance and budget effects applied during insertion.
+    if (trans.type === 'income') {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+    } else if (trans.type === 'expense') {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+
+      const month = trans.date.substring(0, 7)
+      await client.query(
+        `
+        UPDATE public.budgets
+        SET spent = GREATEST(spent - $1, 0)
+        WHERE user_id = $2 AND category = $3 AND month = $4
+        `,
+        [trans.amount, userId, trans.category, month]
+      )
+    } else if (trans.type === 'transfer' && trans.toAccountId) {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.toAccountId, userId]
+      )
+    }
+
+    const deleted = await client.query(
+      'DELETE FROM public.transactions WHERE id = $1 AND user_id = $2',
+      [transactionId, userId]
+    )
+
+    return (deleted.rowCount || 0) > 0
+  }, userId)
+}
+
 // ============================================================================
 // BUDGETS
 // ============================================================================
@@ -307,6 +381,21 @@ export async function addBudget(
   budget: Omit<Budget, 'id' | 'createdAt' | 'spent'>
 ): Promise<Budget> {
   try {
+    const existing = await query<{ id: string }>(
+      `
+      SELECT id
+      FROM public.budgets
+      WHERE user_id = $1 AND category = $2 AND month = $3
+      LIMIT 1
+      `,
+      [userId, budget.category, budget.month],
+      userId
+    )
+
+    if (existing.rows[0]) {
+      throw new Error('Budget already exists for category and month')
+    }
+
     const result = await query<Budget>(
       `
       INSERT INTO public.budgets (
@@ -353,12 +442,19 @@ export async function updateBudget(
   updates: Partial<Budget>
 ): Promise<Budget | null> {
   try {
-    const setClause = Object.entries(updates)
-      .filter(([key]) => key !== 'id' && key !== 'createdAt')
-      .map(([key], index) => {
-        const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase()
-        return `${dbKey} = $${index + 2}`
-      })
+    const allowedFields: Record<string, string> = {
+      category: 'category',
+      amount: 'amount',
+      month: 'month',
+      spent: 'spent',
+    }
+
+    const filteredEntries = Object.entries(updates).filter(
+      ([key, value]) => key in allowedFields && value !== undefined
+    )
+
+    const setClause = filteredEntries
+      .map(([key], index) => `${allowedFields[key]} = $${index + 2}`)
       .join(', ')
 
     if (!setClause) return null
@@ -367,7 +463,7 @@ export async function updateBudget(
       `
       UPDATE public.budgets
       SET ${setClause}
-      WHERE id = $1 AND user_id = $${Object.keys(updates).length + 1}
+      WHERE id = $1 AND user_id = $${filteredEntries.length + 2}
       RETURNING 
         id,
         category,
@@ -376,7 +472,7 @@ export async function updateBudget(
         month,
         created_at as "createdAt"
       `,
-      [budgetId, ...Object.values(updates), userId],
+      [budgetId, ...filteredEntries.map(([, value]) => value), userId],
       userId
     )
 
@@ -497,12 +593,21 @@ export async function updateGoal(
   updates: Partial<Goal>
 ): Promise<Goal | null> {
   try {
-    const setClause = Object.entries(updates)
-      .filter(([key]) => key !== 'id' && key !== 'createdAt')
-      .map(([key], index) => {
-        const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase()
-        return `${dbKey} = $${index + 2}`
-      })
+    const allowedFields: Record<string, string> = {
+      name: 'name',
+      targetAmount: 'target_amount',
+      currentAmount: 'current_amount',
+      deadline: 'deadline',
+      priority: 'priority',
+      status: 'status',
+    }
+
+    const filteredEntries = Object.entries(updates).filter(
+      ([key, value]) => key in allowedFields && value !== undefined
+    )
+
+    const setClause = filteredEntries
+      .map(([key], index) => `${allowedFields[key]} = $${index + 2}`)
       .join(', ')
 
     if (!setClause) return null
@@ -511,7 +616,7 @@ export async function updateGoal(
       `
       UPDATE public.goals
       SET ${setClause}
-      WHERE id = $1 AND user_id = $${Object.keys(updates).length + 1}
+      WHERE id = $1 AND user_id = $${filteredEntries.length + 2}
       RETURNING 
         id,
         name,
@@ -522,7 +627,7 @@ export async function updateGoal(
         status,
         created_at as "createdAt"
       `,
-      [goalId, ...Object.values(updates), userId],
+      [goalId, ...filteredEntries.map(([, value]) => value), userId],
       userId
     )
 

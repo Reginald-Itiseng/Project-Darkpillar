@@ -35,8 +35,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const normalizedEmail = String(email).trim().toLowerCase()
+    const normalizedPin = String(pin)
+
     // Find user by email
-    const user = await getUserByEmail(email)
+    const user = await getUserByEmail(normalizedEmail)
     if (!user) {
       return NextResponse.json(
         { error: 'Invalid email or PIN' },
@@ -46,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     // Verify PIN
     const passwordHash = await getPasswordHash(user.id)
-    if (!passwordHash || !verifyPassword(pin, passwordHash)) {
+    if (!passwordHash || !verifyPassword(normalizedPin, passwordHash)) {
       return NextResponse.json(
         { error: 'Invalid email or PIN' },
         { status: 401 }

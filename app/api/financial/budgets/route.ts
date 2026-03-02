@@ -68,6 +68,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (Number(amount) <= 0) {
+      return NextResponse.json(
+        { error: 'Amount must be greater than zero' },
+        { status: 400 }
+      )
+    }
+
     // Validate month format (YYYY-MM)
     if (!/^\d{4}-\d{2}$/.test(month)) {
       return NextResponse.json(
@@ -78,12 +85,19 @@ export async function POST(request: NextRequest) {
 
     const budget = await addBudget(userId, {
       category,
-      amount,
+      amount: Number(amount),
       month,
     })
 
     return NextResponse.json({ budget }, { status: 201 })
   } catch (error) {
+    if (error instanceof Error && error.message.includes('Budget already exists')) {
+      return NextResponse.json(
+        { error: 'Budget already exists for this category and month' },
+        { status: 409 }
+      )
+    }
+
     console.error('Error creating budget:', error)
     return NextResponse.json(
       { error: 'Failed to create budget' },
@@ -117,7 +131,16 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json()
-    const budget = await updateBudget(userId, budgetId, body)
+    const { amount } = body
+
+    if (amount === undefined || amount === null || Number(amount) <= 0) {
+      return NextResponse.json(
+        { error: 'Amount must be greater than zero' },
+        { status: 400 }
+      )
+    }
+
+    const budget = await updateBudget(userId, budgetId, { amount: Number(amount) })
 
     if (!budget) {
       return NextResponse.json(

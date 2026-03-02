@@ -230,6 +230,18 @@ export async function addTransaction(transaction: Omit<Transaction, 'id' | 'crea
   return data.transaction
 }
 
+export async function deleteTransaction(id: string): Promise<void> {
+  const response = await fetch(`/api/financial/transactions?id=${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to delete transaction'))
+  }
+}
+
 // ============================================================================
 // BUDGETS
 // ============================================================================

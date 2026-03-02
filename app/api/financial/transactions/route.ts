@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getTransactions, addTransaction } from '@/lib/db-financial'
+import { getTransactions, addTransaction, deleteTransaction } from '@/lib/db-financial'
 import { getSessionByToken } from '@/lib/db-auth'
 
 /**
@@ -75,6 +75,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (Number(amount) <= 0) {
+      return NextResponse.json(
+        { error: 'Amount must be greater than zero' },
+        { status: 400 }
+      )
+    }
+
     if (type === 'transfer' && !toAccountId) {
       return NextResponse.json(
         { error: 'toAccountId is required for transfer transactions' },
@@ -82,9 +89,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (type === 'transfer' && accountId === toAccountId) {
+      return NextResponse.json(
+        { error: 'Source and destination accounts must be different' },
+        { status: 400 }
+      )
+    }
+
     const transaction = await addTransaction(userId, {
       type,
-      amount,
+      amount: Number(amount),
       category,
       description: description || '',
       accountId,
@@ -97,6 +111,49 @@ export async function POST(request: NextRequest) {
     console.error('Error creating transaction:', error)
     return NextResponse.json(
       { error: 'Failed to create transaction' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * DELETE /api/financial/transactions/:id
+ * Delete a transaction and reverse its account/budget effects
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const userId = await getUserIdFromRequest(request)
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const url = new URL(request.url)
+    const transactionId = url.searchParams.get('id')
+
+    if (!transactionId) {
+      return NextResponse.json(
+        { error: 'Transaction ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const success = await deleteTransaction(userId, transactionId)
+
+    if (!success) {
+      return NextResponse.json(
+        { error: 'Transaction not found' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({ success: true }, { status: 200 })
+  } catch (error) {
+    console.error('Error deleting transaction:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete transaction' },
       { status: 500 }
     )
   }
