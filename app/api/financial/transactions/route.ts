@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTransactions, addTransaction, deleteTransaction } from '@/lib/db-financial'
-import { getSessionByToken } from '@/lib/db-auth'
+import { getSessionByToken, ensureFinancialUserLink } from '@/lib/db-auth'
 import { toApiError } from '@/lib/api-error'
 import type { Transaction } from '@/lib/types'
 
@@ -131,6 +131,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    await ensureFinancialUserLink(userId)
+
     const transaction = await addTransaction(userId, {
       type: type as Transaction['type'],
       amount: parsedAmount,
@@ -175,6 +177,8 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    await ensureFinancialUserLink(userId)
 
     const success = await deleteTransaction(userId, transactionId)
 

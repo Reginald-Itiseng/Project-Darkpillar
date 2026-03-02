@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getBudgets, addBudget, updateBudget, deleteBudget } from '@/lib/db-financial'
-import { getSessionByToken } from '@/lib/db-auth'
+import { getSessionByToken, ensureFinancialUserLink } from '@/lib/db-auth'
 import { toApiError } from '@/lib/api-error'
 
 function isValidMonth(value: string): boolean {
@@ -100,6 +100,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    await ensureFinancialUserLink(userId)
+
     const budget = await addBudget(userId, {
       category: normalizedCategory,
       amount: parsedAmount,
@@ -159,6 +161,8 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    await ensureFinancialUserLink(userId)
+
     const budget = await updateBudget(userId, budgetId, { amount: parsedAmount })
 
     if (!budget) {
@@ -202,6 +206,8 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    await ensureFinancialUserLink(userId)
 
     const success = await deleteBudget(userId, budgetId)
 

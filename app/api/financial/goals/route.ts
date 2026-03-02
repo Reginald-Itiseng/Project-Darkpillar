@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getGoals, addGoal, updateGoal, deleteGoal } from '@/lib/db-financial'
-import { getSessionByToken } from '@/lib/db-auth'
+import { getSessionByToken, ensureFinancialUserLink } from '@/lib/db-auth'
 import { toApiError } from '@/lib/api-error'
 import type { Goal } from '@/lib/types'
 
@@ -132,6 +132,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    await ensureFinancialUserLink(userId)
+
     const goal = await addGoal(userId, {
       name: normalizedName,
       targetAmount: parsedTargetAmount,
@@ -261,6 +263,8 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    await ensureFinancialUserLink(userId)
+
     const goal = await updateGoal(userId, goalId, updates)
 
     if (!goal) {
@@ -304,6 +308,8 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    await ensureFinancialUserLink(userId)
 
     const success = await deleteGoal(userId, goalId)
 

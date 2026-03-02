@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAccounts, addAccount, updateAccount } from '@/lib/db-financial'
-import { getSessionByToken } from '@/lib/db-auth'
+import { getSessionByToken, ensureFinancialUserLink } from '@/lib/db-auth'
 import { toApiError } from '@/lib/api-error'
 import type { Account } from '@/lib/types'
 
@@ -137,6 +137,8 @@ export async function POST(request: NextRequest) {
 
       parsedInterestRate = interest
     }
+
+    await ensureFinancialUserLink(userId)
 
     const account = await addAccount(userId, {
       name: normalizedName,
@@ -299,6 +301,8 @@ export async function PUT(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    await ensureFinancialUserLink(userId)
 
     const account = await updateAccount(userId, accountId, updates)
 

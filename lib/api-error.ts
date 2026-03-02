@@ -5,6 +5,7 @@ type PgLikeError = Error & {
   constraint?: string
   table?: string
   detail?: string
+  statusCode?: number
 }
 
 export function toApiError(
@@ -16,6 +17,10 @@ export function toApiError(
   }
 
   const pgError = error as PgLikeError
+  if (typeof pgError.statusCode === 'number') {
+    return { status: pgError.statusCode, message: pgError.message || fallbackMessage }
+  }
+
   const code = pgError.code
   const message = formatDbError(error)
   const detail = `${pgError.message || ''} ${pgError.detail || ''}`.toLowerCase()

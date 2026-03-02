@@ -15,6 +15,31 @@ interface RegistrationInvite {
   createdBy: string
 }
 
+interface PublicUsersColumn {
+  column_name: string
+  is_nullable: 'YES' | 'NO'
+  column_default: string | null
+}
+
+interface LinkSourceUser {
+  id: string
+  name: string | null
+  email: string | null
+  clearanceLevel: number
+}
+
+let publicUsersColumnsCache: PublicUsersColumn[] | null = null
+
+function quoteIdent(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function linkageError(message: string): Error & { statusCode: number } {
+  const error = new Error(message) as Error & { statusCode: number }
+  error.statusCode = 409
+  return error
+}
+
 /**
  * Get user by ID from neon_auth.user
  */
@@ -319,6 +344,135 @@ export async function cleanupAuthUser(userId: string): Promise<void> {
     await query(`DELETE FROM neon_auth."user" WHERE id = $1`, [userId])
   } catch (error) {
     console.error('Error cleaning up auth user:', error)
+  }
+}
+
+/**
+ * Ensure a matching profile exists in public.users when legacy foreign keys
+ * still point there (instead of neon_auth.user).
+ */
+export async function ensureFinancialUserLink(userId: string): Promise<void> {
+  try {
+    if (!publicUsersColumnsCache) {
+      const columnsResult = await query<PublicUsersColumn>(
+        `
+        SELECT column_name, is_nullable, column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users'
+        ORDER BY ordinal_position
+        `
+      )
+
+      publicUsersColumnsCache = columnsResult.rows
+    }
+
+    const columns = publicUsersColumnsCache
+    if (!columns || columns.length === 0) {
+      return
+    }
+
+    const columnNames = new Set(columns.map((col) => col.column_name))
+    const keyColumn = columnNames.has('id')
+      ? 'id'
+      : columnNames.has('user_id')
+        ? 'user_id'
+        : null
+
+    if (!keyColumn) {
+      throw linkageError('public.users is missing an id key column (expected id or user_id).')
+    }
+
+    const existing = await query<{ exists: boolean }>(
+      `
+      SELECT EXISTS (
+        SELECT 1 FROM public.users WHERE ${quoteIdent(keyColumn)} = $1
+      ) as exists
+      `,
+      [userId]
+    )
+
+    if (existing.rows[0]?.exists) {
+      return
+    }
+
+    const userResult = await query<LinkSourceUser>(
+      `
+      SELECT
+        id,
+        name,
+        email,
+        COALESCE(clearance_level, 0) as "clearanceLevel"
+      FROM neon_auth."user"
+      WHERE id = $1
+      `,
+      [userId]
+    )
+
+    const sourceUser = userResult.rows[0]
+    if (!sourceUser) {
+      throw linkageError('Authenticated user record not found in neon_auth.user.')
+    }
+
+    const nowIso = new Date().toISOString()
+    const valueByColumn: Record<string, unknown> = {
+      id: sourceUser.id,
+      user_id: sourceUser.id,
+      username: sourceUser.name || sourceUser.email || sourceUser.id,
+      name: sourceUser.name || sourceUser.email || sourceUser.id,
+      email: sourceUser.email,
+      clearance_level: sourceUser.clearanceLevel,
+      clearanceLevel: sourceUser.clearanceLevel,
+      created_at: nowIso,
+      createdAt: nowIso,
+      updated_at: nowIso,
+      updatedAt: nowIso,
+    }
+
+    const requiredWithoutDefault = columns.filter(
+      (col) => col.is_nullable === 'NO' && col.column_default === null
+    )
+
+    const missingRequired = requiredWithoutDefault
+      .map((col) => col.column_name)
+      .filter((name) => valueByColumn[name] === undefined || valueByColumn[name] === null)
+
+    if (missingRequired.length > 0) {
+      throw linkageError(
+        `Cannot auto-sync public.users due to required columns without values: ${missingRequired.join(', ')}.`
+      )
+    }
+
+    const insertColumns = columns
+      .map((col) => col.column_name)
+      .filter((name) => valueByColumn[name] !== undefined && valueByColumn[name] !== null)
+
+    if (insertColumns.length === 0) {
+      throw linkageError('Cannot auto-sync public.users: no compatible columns were found.')
+    }
+
+    const values = insertColumns.map((column) => valueByColumn[column])
+    const placeholders = insertColumns.map((_, index) => `$${index + 1}`)
+
+    await query(
+      `
+      INSERT INTO public.users (${insertColumns.map(quoteIdent).join(', ')})
+      VALUES (${placeholders.join(', ')})
+      ON CONFLICT DO NOTHING
+      `,
+      values
+    )
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error as Error & { statusCode?: number }).statusCode === 409
+    ) {
+      throw error
+    }
+
+    console.error('Error ensuring financial user link:', error)
+    throw linkageError(
+      'User profile linkage is missing in the financial schema. Sync/migrate user records before creating financial data.'
+    )
   }
 }
 

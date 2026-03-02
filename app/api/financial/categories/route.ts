@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCategories, addCategory } from '@/lib/db-financial'
-import { getSessionByToken } from '@/lib/db-auth'
+import { getSessionByToken, ensureFinancialUserLink } from '@/lib/db-auth'
 import { toApiError } from '@/lib/api-error'
 import type { Category } from '@/lib/types'
 
@@ -86,6 +86,8 @@ export async function POST(request: NextRequest) {
     }
 
     const normalizedIcon = icon ? String(icon).trim() : undefined
+
+    await ensureFinancialUserLink(userId)
 
     const category = await addCategory(userId, {
       name: normalizedName,
