@@ -444,9 +444,13 @@ function LoanModal({
                 setLoanType(nextType)
                 if (nextType === "standard") {
                   setModelResult(null)
+                } else if (!loanDurationDays && startDate && dueDate) {
+                  const start = new Date(`${startDate}T00:00:00Z`).getTime()
+                  const due = new Date(`${dueDate}T00:00:00Z`).getTime()
+                  const days = Math.max(1, Math.ceil((due - start) / (1000 * 60 * 60 * 24)))
+                  setLoanDurationDays(String(days))
                 }
               }}
-              disabled={isEdit}
               className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
             >
               <option value="standard">STANDARD LOAN</option>
@@ -518,7 +522,6 @@ function LoanModal({
                     step="0.01"
                     value={flatInterestRatePercent}
                     onChange={(e) => setFlatInterestRatePercent(e.target.value)}
-                    disabled={isEdit}
                     className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
                   />
                 </div>
@@ -530,22 +533,19 @@ function LoanModal({
                     step="1"
                     value={loanDurationDays}
                     onChange={(e) => setLoanDurationDays(e.target.value)}
-                    disabled={isEdit}
                     className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
                   />
                 </div>
               </div>
 
-              {!isEdit && (
-                <button
-                  type="button"
-                  onClick={() => void handleRunModel()}
-                  disabled={isModeling}
-                  className="px-3 py-2 bg-primary text-primary-foreground font-mono text-xs rounded hover:bg-primary/90 disabled:opacity-60"
-                >
-                  {isModeling ? "MODELING..." : "RUN MODEL"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => void handleRunModel()}
+                disabled={isModeling}
+                className="px-3 py-2 bg-primary text-primary-foreground font-mono text-xs rounded hover:bg-primary/90 disabled:opacity-60"
+              >
+                {isModeling ? "MODELING..." : "RUN MODEL"}
+              </button>
 
               {modelResult && (
                 <div className="p-3 bg-background/40 border border-border rounded">
