@@ -1,5 +1,4 @@
 import { Pool, PoolClient, QueryResult } from '@neondatabase/serverless'
-import { sql } from '@neondatabase/serverless'
 
 // Initialize connection pool
 let pool: Pool | null = null
@@ -90,5 +89,4 @@ export function formatDbError(error: unknown): string {
   return 'Unknown database error'
 }
 
-// Export sql for use in other files
-export { sql }
+
