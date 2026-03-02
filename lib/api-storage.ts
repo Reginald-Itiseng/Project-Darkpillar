@@ -1,5 +1,14 @@
 import type { User, Account, Transaction, Budget, Goal, Category } from './types'
 
+export interface AdminInvite {
+  code: string
+  id: string
+  maxUses: number
+  usesCount: number
+  expiresAt: string | null
+  createdAt: string
+}
+
 function getSessionToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('session_token')
@@ -115,6 +124,22 @@ export async function verifySession(): Promise<User | null> {
     clearSessionToken()
     return null
   }
+}
+
+export async function createInviteCode(maxUses = 1, expiresInDays = 14): Promise<AdminInvite> {
+  const response = await fetch('/api/admin/invites', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ maxUses, expiresInDays }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to create invite'))
+  }
+
+  const data = await response.json()
+  return data.invite as AdminInvite
 }
 
 // ============================================================================
