@@ -196,6 +196,7 @@ function AccountCard({
   onToggleActive: () => void
 }) {
   const isFixedDeposit = account.type === "fixed-deposit"
+  const isSavingsPocket = account.type === "savings-pocket"
   const estimatedInterest =
     isFixedDeposit && account.depositDate && account.maturityDate && account.interestRate
       ? calculateInterest(account.balance, account.interestRate, account.depositDate, account.maturityDate)
@@ -212,11 +213,17 @@ function AccountCard({
           <div className="flex items-center gap-3">
             <div
               className={`w-10 h-10 rounded flex items-center justify-center ${
-                isFixedDeposit ? "bg-accent/10 border border-accent/30" : "bg-primary/10 border border-primary/30"
+                isFixedDeposit
+                  ? "bg-accent/10 border border-accent/30"
+                  : isSavingsPocket
+                    ? "bg-success/10 border border-success/30"
+                    : "bg-primary/10 border border-primary/30"
               }`}
             >
               {isFixedDeposit ? (
                 <PiggyBank className={`w-5 h-5 ${account.isActive ? "text-accent" : "text-muted-foreground"}`} />
+              ) : isSavingsPocket ? (
+                <PiggyBank className={`w-5 h-5 ${account.isActive ? "text-success" : "text-muted-foreground"}`} />
               ) : (
                 <Wallet className={`w-5 h-5 ${account.isActive ? "text-primary" : "text-muted-foreground"}`} />
               )}
@@ -224,7 +231,7 @@ function AccountCard({
             <div>
               <div className="font-mono text-sm text-foreground">{account.name}</div>
               <div className="font-mono text-xs text-muted-foreground uppercase">
-                {isFixedDeposit ? "FIXED DEPOSIT" : "DAY-TO-DAY"}
+                {isFixedDeposit ? "FIXED DEPOSIT" : isSavingsPocket ? "SAVINGS POCKET" : "CASHPAL"}
                 {account.isPrimary && <span className="text-primary ml-2">• PRIMARY</span>}
               </div>
             </div>
@@ -310,7 +317,7 @@ function AccountModal({
   onSave: () => Promise<void>
 }) {
   const [name, setName] = useState(account?.name || "")
-  const [type, setType] = useState<"day-to-day" | "fixed-deposit">(account?.type || "day-to-day")
+  const [type, setType] = useState<"day-to-day" | "savings-pocket" | "fixed-deposit">(account?.type || "day-to-day")
   const [balance, setBalance] = useState(account?.balance?.toString() || "0")
   const [interestRate, setInterestRate] = useState(account?.interestRate?.toString() || "")
   const [depositDate, setDepositDate] = useState(account?.depositDate || "")
@@ -382,7 +389,7 @@ function AccountModal({
 
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">ACCOUNT TYPE</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => setType("day-to-day")}
@@ -393,7 +400,19 @@ function AccountModal({
                 }`}
               >
                 <Wallet className="w-5 h-5 mx-auto mb-1" />
-                DAY-TO-DAY
+                CASHPAL
+              </button>
+              <button
+                type="button"
+                onClick={() => setType("savings-pocket")}
+                className={`p-3 rounded border font-mono text-xs transition-colors ${
+                  type === "savings-pocket"
+                    ? "bg-success/10 border-success text-success"
+                    : "bg-secondary border-border text-muted-foreground hover:border-success/50"
+                }`}
+              >
+                <PiggyBank className="w-5 h-5 mx-auto mb-1" />
+                SAVINGS
               </button>
               <button
                 type="button"
@@ -405,7 +424,7 @@ function AccountModal({
                 }`}
               >
                 <PiggyBank className="w-5 h-5 mx-auto mb-1" />
-                FIXED DEPOSIT
+                FIXED
               </button>
             </div>
           </div>
@@ -460,7 +479,7 @@ function AccountModal({
             </>
           )}
 
-          {type === "day-to-day" && (
+          {(type === "day-to-day" || type === "savings-pocket") && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -498,3 +517,4 @@ function AccountModal({
     </div>
   )
 }
+

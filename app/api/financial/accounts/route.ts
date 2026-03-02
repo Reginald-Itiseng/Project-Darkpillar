@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!['day-to-day', 'fixed-deposit'].includes(String(type))) {
+    if (!['day-to-day', 'savings-pocket', 'fixed-deposit'].includes(String(type))) {
       return NextResponse.json(
         { error: 'Invalid account type' },
         { status: 400 }
@@ -201,7 +201,7 @@ export async function PUT(request: NextRequest) {
     }
 
     if ('type' in body) {
-      if (!['day-to-day', 'fixed-deposit'].includes(String(body.type))) {
+      if (!['day-to-day', 'savings-pocket', 'fixed-deposit'].includes(String(body.type))) {
         return NextResponse.json(
           { error: 'Invalid account type' },
           { status: 400 }
@@ -274,7 +274,7 @@ export async function PUT(request: NextRequest) {
       updates.isPrimary = Boolean(body.isPrimary)
     }
 
-    if (updates.type === 'day-to-day') {
+    if (updates.type === 'day-to-day' || updates.type === 'savings-pocket') {
       updates.interestRate = null as unknown as number
       updates.depositDate = null as unknown as string
       updates.maturityDate = null as unknown as string

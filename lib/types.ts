@@ -10,7 +10,7 @@ export interface User {
 export interface Account {
   id: string
   name: string
-  type: "day-to-day" | "fixed-deposit"
+  type: "day-to-day" | "savings-pocket" | "fixed-deposit"
   balance: number
   interestRate?: number
   maturityDate?: string
@@ -65,6 +65,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: "2", name: "Freelance", type: "income", isDefault: true },
   { id: "3", name: "Investments", type: "income", isDefault: true },
   { id: "4", name: "Other Income", type: "income", isDefault: true },
+  { id: "15", name: "Interest - Savings Pocket", type: "income", isDefault: true },
   { id: "5", name: "Food & Dining", type: "expense", isDefault: true },
   { id: "6", name: "Transportation", type: "expense", isDefault: true },
   { id: "7", name: "Utilities", type: "expense", isDefault: true },
@@ -75,4 +76,9 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: "12", name: "Bills & Fees", type: "expense", isDefault: true },
   { id: "13", name: "Savings", type: "expense", isDefault: true },
   { id: "14", name: "Other", type: "expense", isDefault: true },
+  { id: "16", name: "Bank Fees", type: "expense", isDefault: true },
+  { id: "17", name: "Cash Withdrawal", type: "expense", isDefault: true },
+  { id: "18", name: "CashPal Transfer", type: "expense", isDefault: true },
+  { id: "19", name: "Savings Pocket Contribution", type: "expense", isDefault: true },
+  { id: "20", name: "Savings Pocket Withdrawal", type: "expense", isDefault: true },
 ]

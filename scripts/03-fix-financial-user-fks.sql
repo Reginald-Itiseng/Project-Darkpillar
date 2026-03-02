@@ -19,7 +19,7 @@ DECLARE
 BEGIN
   FOREACH t_name IN ARRAY ARRAY['accounts', 'transactions', 'budgets', 'goals', 'categories']
   LOOP
-    -- Drop legacy foreign keys to public.users
+    -- Drop any non-canonical user_id foreign keys first
     FOR fk IN
       SELECT tc.constraint_name
       FROM information_schema.table_constraints tc
@@ -33,8 +33,10 @@ BEGIN
         AND tc.table_name = t_name
         AND tc.constraint_type = 'FOREIGN KEY'
         AND kcu.column_name = 'user_id'
-        AND ccu.table_schema = 'public'
-        AND ccu.table_name = 'users'
+        AND NOT (
+          ccu.table_schema = 'neon_auth'
+          AND ccu.table_name = 'user'
+        )
     LOOP
       EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', t_name, fk.constraint_name);
     END LOOP;
@@ -63,6 +65,21 @@ BEGIN
         AND ccu.table_schema = 'neon_auth'
         AND ccu.table_name = 'user'
     ) THEN
+      -- Guard against name collisions from partially applied old migrations.
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints tc
+        WHERE tc.table_schema = 'public'
+          AND tc.table_name = t_name
+          AND tc.constraint_name = t_name || '_user_id_neon_auth_fkey'
+      ) THEN
+        EXECUTE format(
+          'ALTER TABLE public.%I DROP CONSTRAINT %I',
+          t_name,
+          t_name || '_user_id_neon_auth_fkey'
+        );
+      END IF;
+
       EXECUTE format(
         'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (user_id) REFERENCES neon_auth."user"(id) ON DELETE CASCADE',
         t_name,
