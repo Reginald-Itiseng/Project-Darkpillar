@@ -80,7 +80,6 @@ export async function POST(request: NextRequest) {
       category,
       amount,
       month,
-      createdAt: new Date().toISOString(),
     })
 
     return NextResponse.json({ budget }, { status: 201 })

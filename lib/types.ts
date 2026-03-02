@@ -1,7 +1,8 @@
 export interface User {
   id: string
   username: string
-  pin: string
+  email?: string
+  pin?: string
   clearanceLevel: number
   createdAt: string
 }

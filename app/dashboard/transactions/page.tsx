@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getTransactions, getAccounts, getCategories, addTransaction, addCategory } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import type { Transaction, Account, Category } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth } from "@/lib/utils"
 import { Plus, TrendingUp, TrendingDown, ArrowLeftRight, Filter, X, Search, AlertCircle } from "lucide-react"
@@ -19,14 +19,19 @@ export default function TransactionsPage() {
   const [filterAccount, setFilterAccount] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
 
-  const loadData = () => {
-    setTransactions(getTransactions())
-    setAccounts(getAccounts())
-    setCategories(getCategories())
+  const loadData = async () => {
+    const [nextTransactions, nextAccounts, nextCategories] = await Promise.all([
+      apiStorage.getTransactions(),
+      apiStorage.getAccounts(),
+      apiStorage.getCategories(),
+    ])
+    setTransactions(nextTransactions)
+    setAccounts(nextAccounts)
+    setCategories(nextCategories)
   }
 
   useEffect(() => {
-    loadData()
+    void loadData()
   }, [])
 
   const filteredTransactions = transactions
@@ -246,13 +251,13 @@ export default function TransactionsPage() {
           accounts={accounts.filter((a) => a.isActive)}
           categories={categories}
           onClose={() => setShowModal(false)}
-          onSave={() => {
-            loadData()
+          onSave={async () => {
+            await loadData()
             setShowModal(false)
           }}
-          onAddCategory={(category) => {
-            addCategory(category)
-            loadData()
+          onAddCategory={async (category) => {
+            await apiStorage.addCategory(category)
+            await loadData()
           }}
         />
       )}
@@ -270,8 +275,8 @@ function TransactionModal({
   accounts: Account[]
   categories: Category[]
   onClose: () => void
-  onSave: () => void
-  onAddCategory: (category: { name: string; type: "income" | "expense" }) => void
+  onSave: () => Promise<void>
+  onAddCategory: (category: { name: string; type: "income" | "expense" }) => Promise<void>
 }) {
   const [type, setType] = useState<"income" | "expense" | "transfer">("expense")
   const [amount, setAmount] = useState("")
@@ -292,7 +297,7 @@ function TransactionModal({
     }
   }, [type, filteredCategories, category])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
@@ -316,28 +321,36 @@ function TransactionModal({
       return
     }
 
-    addTransaction({
-      type,
-      amount: Number.parseFloat(amount),
-      category: type === "transfer" ? "Transfer" : category,
-      description: description.trim().toUpperCase(),
-      accountId,
-      toAccountId: type === "transfer" ? toAccountId : undefined,
-      date,
-    })
+    try {
+      await apiStorage.addTransaction({
+        type,
+        amount: Number.parseFloat(amount),
+        category: type === "transfer" ? "Transfer" : category,
+        description: description.trim().toUpperCase(),
+        accountId,
+        toAccountId: type === "transfer" ? toAccountId : undefined,
+        date,
+      })
 
-    onSave()
+      await onSave()
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO RECORD TRANSACTION")
+    }
   }
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     if (newCategoryName.trim()) {
-      onAddCategory({
-        name: newCategoryName.trim().toUpperCase(),
-        type: type as "income" | "expense",
-      })
-      setCategory(newCategoryName.trim().toUpperCase())
-      setNewCategoryName("")
-      setShowNewCategory(false)
+      try {
+        await onAddCategory({
+          name: newCategoryName.trim().toUpperCase(),
+          type: type as "income" | "expense",
+        })
+        setCategory(newCategoryName.trim().toUpperCase())
+        setNewCategoryName("")
+        setShowNewCategory(false)
+      } catch (err) {
+        setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO ADD CATEGORY")
+      }
     }
   }
 

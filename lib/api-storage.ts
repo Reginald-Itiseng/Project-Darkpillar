@@ -1,68 +1,75 @@
 import type { User, Account, Transaction, Budget, Goal, Category } from './types'
 
-/**
- * Get session token from localStorage (set by auth components)
- */
 function getSessionToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('session_token')
 }
 
-/**
- * Set session token in localStorage
- */
 function setSessionToken(token: string): void {
   if (typeof window === 'undefined') return
   localStorage.setItem('session_token', token)
 }
 
-/**
- * Clear session token from localStorage
- */
 function clearSessionToken(): void {
   if (typeof window === 'undefined') return
   localStorage.removeItem('session_token')
+}
+
+function getAuthHeaders(baseHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = getSessionToken()
+  return token ? { ...baseHeaders, Authorization: `Bearer ${token}` } : baseHeaders
+}
+
+async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const data = await response.json()
+    return data?.error || fallback
+  } catch {
+    return fallback
+  }
 }
 
 // ============================================================================
 // AUTHENTICATION
 // ============================================================================
 
-export async function register(
-  email: string,
-  name: string,
-  pin: string
-): Promise<{ user: User; token: string }> {
+export async function register(email: string, name: string, pin: string): Promise<{ user: User; token: string }> {
   const response = await fetch('/api/auth/register', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, name, pin }),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Registration failed')
+    throw new Error(await parseErrorMessage(response, 'Registration failed'))
   }
 
   const data = await response.json()
-  setSessionToken(data.token)
+  if (data?.token) {
+    setSessionToken(data.token)
+  }
+
   return { user: data.user, token: data.token }
 }
 
 export async function login(email: string, pin: string): Promise<{ user: User; token: string }> {
   const response = await fetch('/api/auth/login', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, pin }),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Login failed')
+    throw new Error(await parseErrorMessage(response, 'Login failed'))
   }
 
   const data = await response.json()
-  setSessionToken(data.token)
+  if (data?.token) {
+    setSessionToken(data.token)
+  }
+
   return { user: data.user, token: data.token }
 }
 
@@ -70,9 +77,8 @@ export async function logout(): Promise<void> {
   try {
     await fetch('/api/auth/logout', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getSessionToken() || ''}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
   } finally {
     clearSessionToken()
@@ -80,15 +86,11 @@ export async function logout(): Promise<void> {
 }
 
 export async function verifySession(): Promise<User | null> {
-  const token = getSessionToken()
-  if (!token) return null
-
   try {
     const response = await fetch('/api/auth/verify', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
 
     if (!response.ok) {
@@ -97,6 +99,12 @@ export async function verifySession(): Promise<User | null> {
     }
 
     const data = await response.json()
+
+    // Keep local token in sync if API returns one.
+    if (data?.session?.token) {
+      setSessionToken(data.session.token)
+    }
+
     return data.user || null
   } catch {
     clearSessionToken()
@@ -109,15 +117,11 @@ export async function verifySession(): Promise<User | null> {
 // ============================================================================
 
 export async function getAccounts(): Promise<Account[]> {
-  const token = getSessionToken()
-  if (!token) return []
-
   try {
     const response = await fetch('/api/financial/accounts', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
 
     if (!response.ok) return []
@@ -129,21 +133,15 @@ export async function getAccounts(): Promise<Account[]> {
 }
 
 export async function addAccount(account: Omit<Account, 'id' | 'createdAt'>): Promise<Account> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch('/api/financial/accounts', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(account),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create account')
+    throw new Error(await parseErrorMessage(response, 'Failed to create account'))
   }
 
   const data = await response.json()
@@ -151,21 +149,15 @@ export async function addAccount(account: Omit<Account, 'id' | 'createdAt'>): Pr
 }
 
 export async function updateAccount(id: string, updates: Partial<Account>): Promise<Account> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch(`/api/financial/accounts?id=${id}`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(updates),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to update account')
+    throw new Error(await parseErrorMessage(response, 'Failed to update account'))
   }
 
   const data = await response.json()
@@ -177,15 +169,11 @@ export async function updateAccount(id: string, updates: Partial<Account>): Prom
 // ============================================================================
 
 export async function getTransactions(): Promise<Transaction[]> {
-  const token = getSessionToken()
-  if (!token) return []
-
   try {
     const response = await fetch('/api/financial/transactions', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
 
     if (!response.ok) return []
@@ -196,24 +184,16 @@ export async function getTransactions(): Promise<Transaction[]> {
   }
 }
 
-export async function addTransaction(
-  transaction: Omit<Transaction, 'id' | 'createdAt'>
-): Promise<Transaction> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
+export async function addTransaction(transaction: Omit<Transaction, 'id' | 'createdAt'>): Promise<Transaction> {
   const response = await fetch('/api/financial/transactions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(transaction),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create transaction')
+    throw new Error(await parseErrorMessage(response, 'Failed to create transaction'))
   }
 
   const data = await response.json()
@@ -225,15 +205,11 @@ export async function addTransaction(
 // ============================================================================
 
 export async function getBudgets(): Promise<Budget[]> {
-  const token = getSessionToken()
-  if (!token) return []
-
   try {
     const response = await fetch('/api/financial/budgets', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
 
     if (!response.ok) return []
@@ -245,21 +221,15 @@ export async function getBudgets(): Promise<Budget[]> {
 }
 
 export async function addBudget(budget: Omit<Budget, 'id' | 'createdAt' | 'spent'>): Promise<Budget> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch('/api/financial/budgets', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(budget),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create budget')
+    throw new Error(await parseErrorMessage(response, 'Failed to create budget'))
   }
 
   const data = await response.json()
@@ -267,21 +237,15 @@ export async function addBudget(budget: Omit<Budget, 'id' | 'createdAt' | 'spent
 }
 
 export async function updateBudget(id: string, updates: Partial<Budget>): Promise<Budget> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch(`/api/financial/budgets?id=${id}`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(updates),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to update budget')
+    throw new Error(await parseErrorMessage(response, 'Failed to update budget'))
   }
 
   const data = await response.json()
@@ -289,19 +253,14 @@ export async function updateBudget(id: string, updates: Partial<Budget>): Promis
 }
 
 export async function deleteBudget(id: string): Promise<void> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch(`/api/financial/budgets?id=${id}`, {
     method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders(),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to delete budget')
+    throw new Error(await parseErrorMessage(response, 'Failed to delete budget'))
   }
 }
 
@@ -310,15 +269,11 @@ export async function deleteBudget(id: string): Promise<void> {
 // ============================================================================
 
 export async function getGoals(): Promise<Goal[]> {
-  const token = getSessionToken()
-  if (!token) return []
-
   try {
     const response = await fetch('/api/financial/goals', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
 
     if (!response.ok) return []
@@ -330,21 +285,15 @@ export async function getGoals(): Promise<Goal[]> {
 }
 
 export async function addGoal(goal: Omit<Goal, 'id' | 'createdAt'>): Promise<Goal> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch('/api/financial/goals', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(goal),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create goal')
+    throw new Error(await parseErrorMessage(response, 'Failed to create goal'))
   }
 
   const data = await response.json()
@@ -352,21 +301,15 @@ export async function addGoal(goal: Omit<Goal, 'id' | 'createdAt'>): Promise<Goa
 }
 
 export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Goal> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch(`/api/financial/goals?id=${id}`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(updates),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to update goal')
+    throw new Error(await parseErrorMessage(response, 'Failed to update goal'))
   }
 
   const data = await response.json()
@@ -374,19 +317,14 @@ export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Go
 }
 
 export async function deleteGoal(id: string): Promise<void> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
   const response = await fetch(`/api/financial/goals?id=${id}`, {
     method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders(),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to delete goal')
+    throw new Error(await parseErrorMessage(response, 'Failed to delete goal'))
   }
 }
 
@@ -395,18 +333,11 @@ export async function deleteGoal(id: string): Promise<void> {
 // ============================================================================
 
 export async function getCategories(): Promise<Category[]> {
-  const token = getSessionToken()
-  if (!token) {
-    // Return default categories if not authenticated
-    return []
-  }
-
   try {
     const response = await fetch('/api/financial/categories', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
+      headers: getAuthHeaders(),
     })
 
     if (!response.ok) return []
@@ -417,24 +348,16 @@ export async function getCategories(): Promise<Category[]> {
   }
 }
 
-export async function addCategory(
-  category: Omit<Category, 'id' | 'isDefault'>
-): Promise<Category> {
-  const token = getSessionToken()
-  if (!token) throw new Error('Not authenticated')
-
+export async function addCategory(category: Omit<Category, 'id' | 'isDefault'>): Promise<Category> {
   const response = await fetch('/api/financial/categories', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(category),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create category')
+    throw new Error(await parseErrorMessage(response, 'Failed to create category'))
   }
 
   const data = await response.json()
@@ -466,3 +389,4 @@ export function clearAllData(): void {
   if (typeof window === 'undefined') return
   localStorage.removeItem('current_user')
 }
+

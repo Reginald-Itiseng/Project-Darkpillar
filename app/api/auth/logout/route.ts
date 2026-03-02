@@ -4,7 +4,9 @@ import { deleteSession } from '@/lib/db-auth'
 export async function POST(request: NextRequest) {
   try {
     // Get session token from cookie or header
-    const token = request.cookies.get('session_token')?.value
+    const token =
+      request.cookies.get('session_token')?.value ||
+      request.headers.get('Authorization')?.replace('Bearer ', '')
 
     if (token) {
       // Try to delete the session from database

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createUser, storePasswordHash, getPasswordHash } from '@/lib/db-auth'
+import { createUser, storePasswordHash, createSession } from '@/lib/db-auth'
 import crypto from 'crypto'
 
 /**
@@ -8,6 +8,10 @@ import crypto from 'crypto'
  */
 function hashPassword(password: string): string {
   return crypto.pbkdf2Sync(password, 'salt', 1000, 64, 'sha512').toString('hex')
+}
+
+function generateSessionToken(): string {
+  return crypto.randomBytes(32).toString('hex')
 }
 
 export async function POST(request: NextRequest) {
@@ -44,8 +48,12 @@ export async function POST(request: NextRequest) {
     const user = await createUser(userId, email, name, 0)
     await storePasswordHash(userId, hashedPin)
 
-    // Return user data (don't return password)
-    return NextResponse.json(
+    // Create session immediately after registration
+    const token = generateSessionToken()
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    await createSession(userId, token, expiresAt)
+
+    const response = NextResponse.json(
       {
         success: true,
         user: {
@@ -55,9 +63,22 @@ export async function POST(request: NextRequest) {
           clearanceLevel: user.clearanceLevel,
           createdAt: user.createdAt,
         },
+        token,
       },
       { status: 201 }
     )
+
+    response.cookies.set({
+      name: 'session_token',
+      value: token,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60,
+      path: '/',
+    })
+
+    return response
   } catch (error) {
     console.error('Registration error:', error)
 

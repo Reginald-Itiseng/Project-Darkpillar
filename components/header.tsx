@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getUser } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import { Bell, Search } from "lucide-react"
 
 export function Header() {
@@ -9,10 +9,21 @@ export function Header() {
   const [currentTime, setCurrentTime] = useState("")
 
   useEffect(() => {
-    const userData = getUser()
-    if (userData) {
-      setUserState({ username: userData.username })
+    const loadUser = async () => {
+      const cachedUser = apiStorage.getCurrentUser()
+      if (cachedUser) {
+        setUserState({ username: cachedUser.username })
+        return
+      }
+
+      const verifiedUser = await apiStorage.verifySession()
+      if (verifiedUser) {
+        apiStorage.setCurrentUser(verifiedUser)
+        setUserState({ username: verifiedUser.username })
+      }
     }
+
+    void loadUser()
 
     const updateTime = () => {
       const now = new Date()

@@ -27,7 +27,7 @@ export async function query<T = any>(
   try {
     // Set app.user_id for RLS policies
     if (userId) {
-      await client.query(`SET app.user_id = '${userId}'`)
+      await client.query(`SELECT set_config('app.user_id', $1, true)`, [userId])
     }
 
     const result = await client.query<T>(text, values)
@@ -50,7 +50,7 @@ export async function transaction<T>(
 
     // Set app.user_id for RLS policies
     if (userId) {
-      await client.query(`SET app.user_id = '${userId}'`)
+      await client.query(`SELECT set_config('app.user_id', $1, true)`, [userId])
     }
 
     const result = await callback(client)

@@ -187,16 +187,16 @@ export async function getSessionByToken(token: string): Promise<any | null> {
 }
 
 /**
- * Delete session
+ * Delete session by token
  */
-export async function deleteSession(sessionId: string): Promise<boolean> {
+export async function deleteSession(token: string): Promise<boolean> {
   try {
     const result = await query(
       `
       DELETE FROM neon_auth.session
-      WHERE id = $1
+      WHERE token = $1
       `,
-      [sessionId]
+      [token]
     )
 
     return result.rowCount ? result.rowCount > 0 : false

@@ -12,13 +12,17 @@ This application now has full Neon database integration with:
 
 ### Required Environment Variables
 
-Make sure the following environment variables are set in your Vercel project:
+Set the following variable in both local development (`.env.local`) and Vercel Project Settings:
 
 ```
 DATABASE_URL=postgresql://user:password@your-neon-host/dbname
 ```
 
 This is automatically set when Neon integration is connected in Vercel.
+
+For local setup:
+1. Copy `.env.example` to `.env.local`
+2. Paste your Neon pooled `DATABASE_URL`
 
 ## Database Schema
 

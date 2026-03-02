@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getAccounts, addAccount, updateAccount } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import type { Account } from "@/lib/types"
 import { formatCurrency, formatDate, calculateInterest } from "@/lib/utils"
 import {
@@ -29,21 +29,22 @@ export default function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [showMenu, setShowMenu] = useState<string | null>(null)
 
-  const loadAccounts = () => {
-    setAccounts(getAccounts())
+  const loadAccounts = async () => {
+    const nextAccounts = await apiStorage.getAccounts()
+    setAccounts(nextAccounts)
   }
 
   useEffect(() => {
-    loadAccounts()
+    void loadAccounts()
   }, [])
 
   const activeAccounts = accounts.filter((a) => a.isActive)
   const inactiveAccounts = accounts.filter((a) => !a.isActive)
   const totalBalance = activeAccounts.reduce((sum, a) => sum + a.balance, 0)
 
-  const handleToggleActive = (account: Account) => {
-    updateAccount(account.id, { isActive: !account.isActive })
-    loadAccounts()
+  const handleToggleActive = async (account: Account) => {
+    await apiStorage.updateAccount(account.id, { isActive: !account.isActive })
+    await loadAccounts()
     setShowMenu(null)
   }
 
@@ -131,7 +132,7 @@ export default function AccountsPage() {
                     showMenu={showMenu === account.id}
                     onMenuToggle={() => setShowMenu(showMenu === account.id ? null : account.id)}
                     onEdit={() => handleEdit(account)}
-                    onToggleActive={() => handleToggleActive(account)}
+                    onToggleActive={() => void handleToggleActive(account)}
                   />
                 ))
               )}
@@ -153,7 +154,7 @@ export default function AccountsPage() {
                     showMenu={showMenu === account.id}
                     onMenuToggle={() => setShowMenu(showMenu === account.id ? null : account.id)}
                     onEdit={() => handleEdit(account)}
-                    onToggleActive={() => handleToggleActive(account)}
+                    onToggleActive={() => void handleToggleActive(account)}
                   />
                 ))}
               </div>
@@ -170,8 +171,8 @@ export default function AccountsPage() {
             setShowModal(false)
             setEditingAccount(null)
           }}
-          onSave={() => {
-            loadAccounts()
+          onSave={async () => {
+            await loadAccounts()
             setShowModal(false)
             setEditingAccount(null)
           }}
@@ -306,7 +307,7 @@ function AccountModal({
 }: {
   account: Account | null
   onClose: () => void
-  onSave: () => void
+  onSave: () => Promise<void>
 }) {
   const [name, setName] = useState(account?.name || "")
   const [type, setType] = useState<"day-to-day" | "fixed-deposit">(account?.type || "day-to-day")
@@ -317,7 +318,7 @@ function AccountModal({
   const [isPrimary, setIsPrimary] = useState(account?.isPrimary || false)
   const [error, setError] = useState("")
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
@@ -342,13 +343,17 @@ function AccountModal({
       isActive: account?.isActive ?? true,
     }
 
-    if (account) {
-      updateAccount(account.id, accountData)
-    } else {
-      addAccount(accountData)
-    }
+    try {
+      if (account) {
+        await apiStorage.updateAccount(account.id, accountData)
+      } else {
+        await apiStorage.addAccount(accountData)
+      }
 
-    onSave()
+      await onSave()
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO SAVE ACCOUNT")
+    }
   }
 
   return (

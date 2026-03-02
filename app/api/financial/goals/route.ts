@@ -89,7 +89,6 @@ export async function POST(request: NextRequest) {
       deadline,
       priority,
       status: status || 'active',
-      createdAt: new Date().toISOString(),
     })
 
     return NextResponse.json({ goal }, { status: 201 })

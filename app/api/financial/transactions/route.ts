@@ -90,7 +90,6 @@ export async function POST(request: NextRequest) {
       accountId,
       toAccountId,
       date,
-      createdAt: new Date().toISOString(),
     })
 
     return NextResponse.json({ transaction }, { status: 201 })

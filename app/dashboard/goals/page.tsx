@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getGoals, addGoal, updateGoal, deleteGoal } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import type { Goal } from "@/lib/types"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Plus, Target, X, Edit2, Trash2, CheckCircle, Pause, Play, AlertTriangle, Clock, Flag } from "lucide-react"
@@ -17,12 +17,13 @@ export default function GoalsPage() {
   const [showContributeModal, setShowContributeModal] = useState<Goal | null>(null)
   const [filter, setFilter] = useState<"all" | "active" | "completed" | "paused">("all")
 
-  const loadGoals = () => {
-    setGoals(getGoals())
+  const loadGoals = async () => {
+    const nextGoals = await apiStorage.getGoals()
+    setGoals(nextGoals)
   }
 
   useEffect(() => {
-    loadGoals()
+    void loadGoals()
   }, [])
 
   const filteredGoals = goals.filter((g) => {
@@ -35,22 +36,22 @@ export default function GoalsPage() {
   const totalTargetAmount = activeGoals.reduce((sum, g) => sum + g.targetAmount, 0)
   const totalCurrentAmount = activeGoals.reduce((sum, g) => sum + g.currentAmount, 0)
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("CONFIRM GOAL DELETION?")) {
-      deleteGoal(id)
-      loadGoals()
+      await apiStorage.deleteGoal(id)
+      await loadGoals()
     }
   }
 
-  const handleToggleStatus = (goal: Goal) => {
+  const handleToggleStatus = async (goal: Goal) => {
     const newStatus = goal.status === "paused" ? "active" : "paused"
-    updateGoal(goal.id, { status: newStatus })
-    loadGoals()
+    await apiStorage.updateGoal(goal.id, { status: newStatus })
+    await loadGoals()
   }
 
-  const handleComplete = (goal: Goal) => {
-    updateGoal(goal.id, { status: "completed", currentAmount: goal.targetAmount })
-    loadGoals()
+  const handleComplete = async (goal: Goal) => {
+    await apiStorage.updateGoal(goal.id, { status: "completed", currentAmount: goal.targetAmount })
+    await loadGoals()
   }
 
   return (
@@ -194,7 +195,7 @@ export default function GoalsPage() {
                                 <Plus className="w-3.5 h-3.5 text-success" />
                               </button>
                               <button
-                                onClick={() => handleToggleStatus(goal)}
+                                onClick={() => void handleToggleStatus(goal)}
                                 className="p-1.5 hover:bg-warning/10 rounded transition-colors"
                                 title="Pause"
                               >
@@ -204,7 +205,7 @@ export default function GoalsPage() {
                           )}
                           {goal.status === "paused" && (
                             <button
-                              onClick={() => handleToggleStatus(goal)}
+                              onClick={() => void handleToggleStatus(goal)}
                               className="p-1.5 hover:bg-success/10 rounded transition-colors"
                               title="Resume"
                             >
@@ -221,7 +222,7 @@ export default function GoalsPage() {
                             <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
                           </button>
                           <button
-                            onClick={() => handleDelete(goal.id)}
+                            onClick={() => void handleDelete(goal.id)}
                             className="p-1.5 hover:bg-destructive/10 rounded transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5 text-destructive" />
@@ -308,7 +309,7 @@ export default function GoalsPage() {
                       {/* Complete Button */}
                       {goal.status === "active" && percentage >= 100 && (
                         <button
-                          onClick={() => handleComplete(goal)}
+                          onClick={() => void handleComplete(goal)}
                           className="w-full mt-3 px-4 py-2 bg-success text-success-foreground font-mono text-xs rounded hover:bg-success/90 transition-colors flex items-center justify-center gap-2"
                         >
                           <CheckCircle className="w-4 h-4" />
@@ -332,8 +333,8 @@ export default function GoalsPage() {
             setShowModal(false)
             setEditingGoal(null)
           }}
-          onSave={() => {
-            loadGoals()
+          onSave={async () => {
+            await loadGoals()
             setShowModal(false)
             setEditingGoal(null)
           }}
@@ -345,8 +346,8 @@ export default function GoalsPage() {
         <ContributeModal
           goal={showContributeModal}
           onClose={() => setShowContributeModal(null)}
-          onSave={() => {
-            loadGoals()
+          onSave={async () => {
+            await loadGoals()
             setShowContributeModal(null)
           }}
         />
@@ -362,7 +363,7 @@ function GoalModal({
 }: {
   goal: Goal | null
   onClose: () => void
-  onSave: () => void
+  onSave: () => Promise<void>
 }) {
   const [name, setName] = useState(goal?.name || "")
   const [targetAmount, setTargetAmount] = useState(goal?.targetAmount?.toString() || "")
@@ -371,7 +372,7 @@ function GoalModal({
   const [priority, setPriority] = useState<Goal["priority"]>(goal?.priority || "medium")
   const [error, setError] = useState("")
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
@@ -399,13 +400,17 @@ function GoalModal({
       status: goal?.status || ("active" as const),
     }
 
-    if (goal) {
-      updateGoal(goal.id, goalData)
-    } else {
-      addGoal(goalData)
-    }
+    try {
+      if (goal) {
+        await apiStorage.updateGoal(goal.id, goalData)
+      } else {
+        await apiStorage.addGoal(goalData)
+      }
 
-    onSave()
+      await onSave()
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO SAVE OBJECTIVE")
+    }
   }
 
   return (
@@ -525,14 +530,14 @@ function ContributeModal({
 }: {
   goal: Goal
   onClose: () => void
-  onSave: () => void
+  onSave: () => Promise<void>
 }) {
   const [amount, setAmount] = useState("")
   const [error, setError] = useState("")
 
   const remaining = goal.targetAmount - goal.currentAmount
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
@@ -544,12 +549,16 @@ function ContributeModal({
     const newAmount = goal.currentAmount + Number.parseFloat(amount)
     const status = newAmount >= goal.targetAmount ? "completed" : goal.status
 
-    updateGoal(goal.id, {
-      currentAmount: Math.min(newAmount, goal.targetAmount),
-      status,
-    })
+    try {
+      await apiStorage.updateGoal(goal.id, {
+        currentAmount: Math.min(newAmount, goal.targetAmount),
+        status,
+      })
 
-    onSave()
+      await onSave()
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO UPDATE GOAL")
+    }
   }
 
   return (

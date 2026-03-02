@@ -84,7 +84,6 @@ export async function POST(request: NextRequest) {
       depositDate,
       isActive: isActive !== false,
       isPrimary: isPrimary || false,
-      createdAt: new Date().toISOString(),
     })
 
     return NextResponse.json({ account }, { status: 201 })

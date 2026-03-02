@@ -5,7 +5,8 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getAccounts, getTransactions, getBudgets, getGoals, getUser } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
+import type { Budget, Goal, Transaction } from "@/lib/types"
 import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
 import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 
@@ -17,67 +18,75 @@ export default function DashboardPage() {
     activeGoals: 0,
     budgetHealth: 0,
   })
-  const [recentTransactions, setRecentTransactions] = useState<any[]>([])
-  const [budgetAlerts, setBudgetAlerts] = useState<any[]>([])
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
+  const [budgetAlerts, setBudgetAlerts] = useState<Array<Budget & { percentage: number }>>([])
   const [user, setUserState] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
-    const userData = getUser()
-    if (userData) {
-      setUserState({ username: userData.username })
+    const loadDashboardData = async () => {
+      const [userData, accounts, transactions, budgets, goals] = await Promise.all([
+        apiStorage.verifySession(),
+        apiStorage.getAccounts(),
+        apiStorage.getTransactions(),
+        apiStorage.getBudgets(),
+        apiStorage.getGoals(),
+      ])
+
+      if (userData) {
+        apiStorage.setCurrentUser(userData)
+        setUserState({ username: userData.username })
+      }
+
+      const currentMonth = getCurrentMonth()
+
+      // Calculate stats
+      const totalBalance = accounts.filter((a) => a.isActive).reduce((sum, a) => sum + a.balance, 0)
+
+      const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
+
+      const monthlyIncome = monthlyTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
+
+      const monthlyExpenses = monthlyTransactions
+        .filter((t) => t.type === "expense")
+        .reduce((sum, t) => sum + t.amount, 0)
+
+      const activeGoals = goals.filter((g: Goal) => g.status === "active").length
+
+      const currentBudgets = budgets.filter((b) => b.month === currentMonth)
+      const budgetHealth =
+        currentBudgets.length > 0
+          ? currentBudgets.reduce((sum, b) => {
+              const usage = b.amount > 0 ? (b.spent / b.amount) * 100 : 0
+              return sum + (usage <= 100 ? 100 - usage : 0)
+            }, 0) / currentBudgets.length
+          : 100
+
+      setStats({
+        totalBalance,
+        monthlyIncome,
+        monthlyExpenses,
+        activeGoals,
+        budgetHealth,
+      })
+
+      // Recent transactions
+      setRecentTransactions(
+        [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5),
+      )
+
+      // Budget alerts
+      const alerts = currentBudgets
+        .map((b) => ({
+          ...b,
+          percentage: b.amount > 0 ? (b.spent / b.amount) * 100 : 0,
+        }))
+        .filter((b) => b.percentage >= 80)
+        .sort((a, b) => b.percentage - a.percentage)
+
+      setBudgetAlerts(alerts)
     }
 
-    const accounts = getAccounts()
-    const transactions = getTransactions()
-    const budgets = getBudgets()
-    const goals = getGoals()
-    const currentMonth = getCurrentMonth()
-
-    // Calculate stats
-    const totalBalance = accounts.filter((a) => a.isActive).reduce((sum, a) => sum + a.balance, 0)
-
-    const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
-
-    const monthlyIncome = monthlyTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
-
-    const monthlyExpenses = monthlyTransactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0)
-
-    const activeGoals = goals.filter((g) => g.status === "active").length
-
-    const currentBudgets = budgets.filter((b) => b.month === currentMonth)
-    const budgetHealth =
-      currentBudgets.length > 0
-        ? currentBudgets.reduce((sum, b) => {
-            const usage = b.amount > 0 ? (b.spent / b.amount) * 100 : 0
-            return sum + (usage <= 100 ? 100 - usage : 0)
-          }, 0) / currentBudgets.length
-        : 100
-
-    setStats({
-      totalBalance,
-      monthlyIncome,
-      monthlyExpenses,
-      activeGoals,
-      budgetHealth,
-    })
-
-    // Recent transactions
-    setRecentTransactions(
-      transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5),
-    )
-
-    // Budget alerts
-    const alerts = currentBudgets
-      .map((b) => ({
-        ...b,
-        percentage: b.amount > 0 ? (b.spent / b.amount) * 100 : 0,
-      }))
-      .filter((b) => b.percentage >= 80)
-      .sort((a, b) => b.percentage - a.percentage)
-
-    setBudgetAlerts(alerts)
+    void loadDashboardData()
   }, [])
 
   return (

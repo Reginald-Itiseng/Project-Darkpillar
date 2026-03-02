@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
-import { getBudgets, getCategories, addBudget, updateBudget, deleteBudget, getTransactions } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import type { Budget, Category } from "@/lib/types"
 import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
 import {
@@ -28,32 +28,35 @@ export default function BudgetsPage() {
   const [showModal, setShowModal] = useState(false)
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null)
 
-  const loadData = () => {
-    setBudgets(getBudgets())
-    setCategories(getCategories())
+  const loadData = async () => {
+    const [nextBudgets, nextCategories] = await Promise.all([apiStorage.getBudgets(), apiStorage.getCategories()])
+    setBudgets(nextBudgets)
+    setCategories(nextCategories)
   }
 
   useEffect(() => {
-    loadData()
-    recalculateSpent()
+    const bootstrap = async () => {
+      await loadData()
+      await recalculateSpent()
+    }
+
+    void bootstrap()
   }, [])
 
   // Recalculate spent amounts based on transactions
-  const recalculateSpent = () => {
-    const transactions = getTransactions()
-    const allBudgets = getBudgets()
+  const recalculateSpent = async () => {
+    const [transactions, allBudgets] = await Promise.all([apiStorage.getTransactions(), apiStorage.getBudgets()])
 
-    const updatedBudgets = allBudgets.map((budget) => {
+    const updatedBudgets = await Promise.all(allBudgets.map(async (budget) => {
       const spent = transactions
         .filter((t) => t.type === "expense" && t.category === budget.category && t.date.startsWith(budget.month))
         .reduce((sum, t) => sum + t.amount, 0)
 
       if (spent !== budget.spent) {
-        updateBudget(budget.id, { spent })
-        return { ...budget, spent }
+        return apiStorage.updateBudget(budget.id, { spent })
       }
       return budget
-    })
+    }))
 
     setBudgets(updatedBudgets)
   }
@@ -70,10 +73,10 @@ export default function BudgetsPage() {
     setSelectedMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("CONFIRM BUDGET DELETION?")) {
-      deleteBudget(id)
-      loadData()
+      await apiStorage.deleteBudget(id)
+      await loadData()
     }
   }
 
@@ -270,7 +273,7 @@ export default function BudgetsPage() {
                             <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
                           </button>
                           <button
-                            onClick={() => handleDelete(budget.id)}
+                            onClick={() => void handleDelete(budget.id)}
                             className="p-1.5 hover:bg-destructive/10 rounded transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5 text-destructive" />
@@ -314,8 +317,8 @@ export default function BudgetsPage() {
             setShowModal(false)
             setEditingBudget(null)
           }}
-          onSave={() => {
-            loadData()
+          onSave={async () => {
+            await loadData()
             setShowModal(false)
             setEditingBudget(null)
           }}
@@ -336,13 +339,13 @@ function BudgetModal({
   month: string
   categories: Category[]
   onClose: () => void
-  onSave: () => void
+  onSave: () => Promise<void>
 }) {
   const [category, setCategory] = useState(budget?.category || categories[0]?.name || "")
   const [amount, setAmount] = useState(budget?.amount?.toString() || "")
   const [error, setError] = useState("")
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
@@ -356,17 +359,21 @@ function BudgetModal({
       return
     }
 
-    if (budget) {
-      updateBudget(budget.id, { amount: Number.parseFloat(amount) })
-    } else {
-      addBudget({
-        category,
-        amount: Number.parseFloat(amount),
-        month,
-      })
-    }
+    try {
+      if (budget) {
+        await apiStorage.updateBudget(budget.id, { amount: Number.parseFloat(amount) })
+      } else {
+        await apiStorage.addBudget({
+          category,
+          amount: Number.parseFloat(amount),
+          month,
+        })
+      }
 
-    onSave()
+      await onSave()
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO SAVE BUDGET")
+    }
   }
 
   return (

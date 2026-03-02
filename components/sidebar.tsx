@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { setAuthenticated } from "@/lib/storage"
+import * as apiStorage from "@/lib/api-storage"
 import { LayoutDashboard, Wallet, ArrowLeftRight, Target, PiggyBank, LogOut, Shield } from "lucide-react"
 
 const navItems = [
@@ -38,9 +38,13 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  const handleLogout = () => {
-    setAuthenticated(false)
-    router.push("/")
+  const handleLogout = async () => {
+    try {
+      await apiStorage.logout()
+    } finally {
+      apiStorage.clearAllData()
+      router.push("/")
+    }
   }
 
   return (
