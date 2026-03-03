@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
 import type { Budget, Goal, Transaction } from "@/lib/types"
-import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
+import { formatCurrency, formatDate, getCurrentMonth, getMonthName } from "@/lib/utils"
 import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 
 const LOAN_MODEL_PREFIX = "__SINGLE_PAYMENT_MODEL__:"
@@ -39,17 +39,25 @@ export default function DashboardPage() {
   })
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
   const [budgetAlerts, setBudgetAlerts] = useState<Array<Budget & { percentage: number }>>([])
+  const [upcomingObligations, setUpcomingObligations] = useState<Array<{
+    id: string
+    kind: "loan" | "recurring-expense"
+    title: string
+    amount: number
+    dueDate: string
+  }>>([])
   const [user, setUserState] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     const loadDashboardData = async () => {
-      const [userData, accounts, transactions, budgets, goals, loanData] = await Promise.all([
+      const [userData, accounts, transactions, budgets, goals, loanData, obligations] = await Promise.all([
         apiStorage.verifySession(),
         apiStorage.getAccounts(),
         apiStorage.getTransactions(),
         apiStorage.getBudgets(),
         apiStorage.getGoals(),
         apiStorage.getLoans(),
+        apiStorage.getUpcomingObligations(30),
       ])
 
       if (userData) {
@@ -66,7 +74,7 @@ export default function DashboardPage() {
       const monthlyTransactions = transactions.filter((t) => t.date.startsWith(currentMonth))
 
       const monthlyIncome = monthlyTransactions
-        .filter((t) => t.type === "income")
+        .filter((t) => t.type === "income" && t.category !== "Loan Disbursement")
         .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
 
       const monthlyExpenses = monthlyTransactions
@@ -136,6 +144,7 @@ export default function DashboardPage() {
         .sort((a, b) => b.percentage - a.percentage)
 
       setBudgetAlerts(alerts)
+      setUpcomingObligations(obligations.slice(0, 8))
     }
 
     void loadDashboardData()
@@ -160,6 +169,30 @@ export default function DashboardPage() {
                 <div>SESSION ID: {Math.random().toString(36).substring(2, 10).toUpperCase()}</div>
                 <div className="text-primary">â— SECURE CONNECTION</div>
               </div>
+            </div>
+          </div>
+
+          <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h2 className="font-mono text-sm text-foreground">UPCOMING OBLIGATIONS</h2>
+              <span className="font-mono text-xs text-muted-foreground">NEXT 30 DAYS</span>
+            </div>
+            <div className="divide-y divide-border">
+              {upcomingObligations.length === 0 ? (
+                <div className="p-8 text-center font-mono text-sm text-muted-foreground">NO UPCOMING OBLIGATIONS</div>
+              ) : (
+                upcomingObligations.map((item) => (
+                  <div key={item.id} className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors">
+                    <div>
+                      <div className="font-mono text-sm text-foreground">{item.title}</div>
+                      <div className="font-mono text-xs text-muted-foreground">
+                        {item.kind === "loan" ? "LOAN LIABILITY" : "RECURRING EXPENSE"} | DUE {formatDate(item.dueDate)}
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm text-warning">{formatCurrency(item.amount)}</div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

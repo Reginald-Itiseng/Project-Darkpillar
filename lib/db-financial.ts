@@ -10,6 +10,14 @@ interface LoanPaymentInput {
   note?: string
 }
 
+export interface UpcomingObligation {
+  id: string
+  kind: 'loan' | 'recurring-expense'
+  title: string
+  amount: number
+  dueDate: string
+}
+
 interface StoredSinglePaymentLoanModel {
   kind: 'single-payment'
   total_due: number
@@ -19,6 +27,37 @@ const LOAN_MODEL_PREFIX = '__SINGLE_PAYMENT_MODEL__:'
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100
+}
+
+function isRecurrenceRule(value: unknown): value is 'weekly' | 'monthly' {
+  return value === 'weekly' || value === 'monthly'
+}
+
+function addDays(dateOnly: string, days: number): string {
+  const date = new Date(`${dateOnly}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function addMonths(monthOnly: string, months: number): string {
+  const [year, month] = monthOnly.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1 + months, 1))
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function addMonthsDateOnly(dateOnly: string, months: number): string {
+  const [year, month, day] = dateOnly.split('-').map(Number)
+  const firstDayTargetMonth = new Date(Date.UTC(year, month - 1 + months, 1))
+  const targetYear = firstDayTargetMonth.getUTCFullYear()
+  const targetMonth = firstDayTargetMonth.getUTCMonth()
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate()
+  const clampedDay = Math.min(day, lastDayOfTargetMonth)
+  return `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`
+}
+
+function compareDateOnly(a: string, b: string): number {
+  if (a === b) return 0
+  return a < b ? -1 : 1
 }
 
 function parseStoredSinglePaymentLoanModel(notes?: string): StoredSinglePaymentLoanModel | null {
@@ -195,8 +234,160 @@ export async function updateAccount(
 // TRANSACTIONS
 // ============================================================================
 
+async function materializeRecurringTransactions(userId: string): Promise<void> {
+  await transaction(async (client) => {
+    const recurringResult = await client.query<
+      Pick<Transaction, 'id' | 'type' | 'amount' | 'category' | 'description' | 'accountId' | 'toAccountId' | 'date'> & {
+        recurrenceRule: 'weekly' | 'monthly'
+        recurrenceEndDate: string | null
+      }
+    >(
+      `
+      SELECT
+        id,
+        type,
+        amount,
+        category,
+        description,
+        account_id as "accountId",
+        to_account_id as "toAccountId",
+        date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate"
+      FROM public.transactions
+      WHERE
+        user_id = $1
+        AND recurrence_rule IS NOT NULL
+        AND parent_transaction_id IS NULL
+      `,
+      [userId]
+    )
+
+    const today = new Date().toISOString().slice(0, 10)
+
+    for (const source of recurringResult.rows) {
+      const maxExistingResult = await client.query<{ maxDate: string | null }>(
+        `
+        SELECT MAX(date)::text as "maxDate"
+        FROM public.transactions
+        WHERE
+          user_id = $1
+          AND (id = $2 OR parent_transaction_id = $2)
+        `,
+        [userId, source.id]
+      )
+
+      let nextDate = maxExistingResult.rows[0]?.maxDate || source.date
+      while (true) {
+        nextDate =
+          source.recurrenceRule === 'weekly'
+            ? addDays(nextDate, 7)
+            : addMonthsDateOnly(nextDate, 1)
+
+        if (compareDateOnly(nextDate, today) > 0) break
+        if (source.recurrenceEndDate && compareDateOnly(nextDate, source.recurrenceEndDate) > 0) break
+
+        const existingResult = await client.query<{ exists: boolean }>(
+          `
+          SELECT EXISTS (
+            SELECT 1
+            FROM public.transactions
+            WHERE user_id = $1 AND parent_transaction_id = $2 AND date = $3
+          ) as exists
+          `,
+          [userId, source.id, nextDate]
+        )
+        if (existingResult.rows[0]?.exists) continue
+
+        await client.query(
+          `
+          INSERT INTO public.transactions (
+            id,
+            user_id,
+            type,
+            amount,
+            category,
+            description,
+            account_id,
+            to_account_id,
+            date,
+            recurrence_rule,
+            recurrence_end_date,
+            parent_transaction_id,
+            is_system_generated,
+            created_at
+          )
+          VALUES (
+            gen_random_uuid(),
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            NULL,
+            NULL,
+            $9,
+            true,
+            NOW()
+          )
+          `,
+          [
+            userId,
+            source.type,
+            source.amount,
+            source.category,
+            source.description,
+            source.accountId,
+            source.toAccountId || null,
+            nextDate,
+            source.id,
+          ]
+        )
+
+        if (source.type === 'income') {
+          await client.query(
+            'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+            [source.amount, source.accountId, userId]
+          )
+        } else if (source.type === 'expense') {
+          await client.query(
+            'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+            [source.amount, source.accountId, userId]
+          )
+        } else if (source.type === 'transfer' && source.toAccountId) {
+          await client.query(
+            'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+            [source.amount, source.accountId, userId]
+          )
+          await client.query(
+            'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+            [source.amount, source.toAccountId, userId]
+          )
+        }
+
+        if (source.type === 'expense') {
+          const month = nextDate.substring(0, 7)
+          await client.query(
+            `
+            UPDATE public.budgets
+            SET spent = spent + $1
+            WHERE user_id = $2 AND category = $3 AND month = $4
+            `,
+            [source.amount, userId, source.category, month]
+          )
+        }
+      }
+    }
+  }, userId)
+}
+
 export async function getTransactions(userId: string): Promise<Transaction[]> {
   try {
+    await materializeRecurringTransactions(userId)
+
     const result = await query<Transaction>(
       `
       SELECT 
@@ -208,6 +399,10 @@ export async function getTransactions(userId: string): Promise<Transaction[]> {
         account_id as "accountId",
         to_account_id as "toAccountId",
         date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate",
+        parent_transaction_id as "parentTransactionId",
+        is_system_generated as "isSystemGenerated",
         created_at as "createdAt"
       FROM public.transactions
       WHERE user_id = $1
@@ -241,6 +436,10 @@ export async function addTransaction(
         account_id,
         to_account_id,
         date,
+        recurrence_rule,
+        recurrence_end_date,
+        parent_transaction_id,
+        is_system_generated,
         created_at
       )
       VALUES (
@@ -253,6 +452,10 @@ export async function addTransaction(
         $6,
         $7,
         $8,
+        $9,
+        $10,
+        NULL,
+        false,
         NOW()
       )
       RETURNING 
@@ -264,6 +467,10 @@ export async function addTransaction(
         account_id as "accountId",
         to_account_id as "toAccountId",
         date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate",
+        parent_transaction_id as "parentTransactionId",
+        is_system_generated as "isSystemGenerated",
         created_at as "createdAt"
       `,
       [
@@ -275,6 +482,8 @@ export async function addTransaction(
         trans.accountId,
         trans.toAccountId || null,
         trans.date,
+        isRecurrenceRule(trans.recurrenceRule) ? trans.recurrenceRule : null,
+        trans.recurrenceEndDate || null,
       ]
     )
 
@@ -371,6 +580,12 @@ export async function deleteTransaction(userId: string, transactionId: string): 
         'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
         [trans.amount, trans.toAccountId, userId]
       )
+    } else if (trans.type === 'transfer' && !trans.toAccountId) {
+      // System inbound transfer (e.g., loan funding): reverse the one-sided credit.
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
     }
 
     const deleted = await client.query(
@@ -386,8 +601,85 @@ export async function deleteTransaction(userId: string, transactionId: string): 
 // BUDGETS
 // ============================================================================
 
+async function materializeRecurringBudgets(userId: string): Promise<void> {
+  await transaction(async (client) => {
+    const recurringResult = await client.query<
+      Pick<Budget, 'category' | 'amount' | 'month'> & { isRecurring: boolean }
+    >(
+      `
+      SELECT
+        category,
+        amount,
+        month,
+        is_recurring as "isRecurring"
+      FROM public.budgets
+      WHERE user_id = $1 AND is_recurring = true
+      ORDER BY month ASC
+      `,
+      [userId]
+    )
+
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const templateByCategory = new Map<string, { amount: number; month: string }>()
+    recurringResult.rows.forEach((row) => {
+      const existing = templateByCategory.get(row.category)
+      if (!existing || existing.month < row.month) {
+        templateByCategory.set(row.category, { amount: Number(row.amount) || 0, month: row.month })
+      }
+    })
+
+    for (const [category, template] of templateByCategory.entries()) {
+      let nextMonth = addMonths(template.month, 1)
+      while (nextMonth <= currentMonth) {
+        const existingResult = await client.query<{ exists: boolean }>(
+          `
+          SELECT EXISTS (
+            SELECT 1
+            FROM public.budgets
+            WHERE user_id = $1 AND category = $2 AND month = $3
+          ) as exists
+          `,
+          [userId, category, nextMonth]
+        )
+
+        if (!existingResult.rows[0]?.exists) {
+          await client.query(
+            `
+            INSERT INTO public.budgets (
+              id,
+              user_id,
+              category,
+              amount,
+              spent,
+              month,
+              is_recurring,
+              created_at
+            )
+            VALUES (
+              gen_random_uuid(),
+              $1,
+              $2,
+              $3,
+              0,
+              $4,
+              true,
+              NOW()
+            )
+            `,
+            [userId, category, template.amount, nextMonth]
+          )
+        }
+
+        nextMonth = addMonths(nextMonth, 1)
+      }
+    }
+  }, userId)
+}
+
 export async function getBudgets(userId: string): Promise<Budget[]> {
   try {
+    await materializeRecurringBudgets(userId)
+
     const result = await query<Budget>(
       `
       SELECT 
@@ -396,6 +688,7 @@ export async function getBudgets(userId: string): Promise<Budget[]> {
         amount,
         spent,
         month,
+        is_recurring as "isRecurring",
         created_at as "createdAt"
       FROM public.budgets
       WHERE user_id = $1
@@ -440,6 +733,7 @@ export async function addBudget(
         amount,
         spent,
         month,
+        is_recurring,
         created_at
       )
       VALUES (
@@ -449,6 +743,7 @@ export async function addBudget(
         $3,
         0,
         $4,
+        $5,
         NOW()
       )
       RETURNING 
@@ -457,9 +752,10 @@ export async function addBudget(
         amount,
         spent,
         month,
+        is_recurring as "isRecurring",
         created_at as "createdAt"
       `,
-      [userId, budget.category, budget.amount, budget.month],
+      [userId, budget.category, budget.amount, budget.month, Boolean(budget.isRecurring)],
       userId
     )
 
@@ -482,6 +778,7 @@ export async function updateBudget(
       amount: 'amount',
       month: 'month',
       spent: 'spent',
+      isRecurring: 'is_recurring',
     }
 
     const filteredEntries = Object.entries(updates).filter(
@@ -505,6 +802,7 @@ export async function updateBudget(
         amount,
         spent,
         month,
+        is_recurring as "isRecurring",
         created_at as "createdAt"
       `,
       [budgetId, ...filteredEntries.map(([, value]) => value), userId],
@@ -819,6 +1117,130 @@ export async function getLoanPayments(userId: string): Promise<LoanPayment[]> {
   }
 }
 
+export async function getUpcomingObligations(userId: string, daysAhead = 30): Promise<UpcomingObligation[]> {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const rangeEnd = addDays(today, daysAhead)
+
+    const obligations: UpcomingObligation[] = []
+
+    const loansResult = await query<Loan>(
+      `
+      SELECT
+        id,
+        lender_name as "lenderName",
+        account_id as "accountId",
+        principal,
+        annual_rate as "annualRate",
+        start_date as "startDate",
+        due_date as "dueDate",
+        outstanding_principal as "outstandingPrincipal",
+        status,
+        notes,
+        created_at as "createdAt"
+      FROM public.loans
+      WHERE user_id = $1 AND status = 'active' AND due_date >= $2 AND due_date <= $3
+      `,
+      [userId, today, rangeEnd],
+      userId
+    )
+
+    const paidInterestResult = await query<{ loanId: string; totalInterest: string }>(
+      `
+      SELECT loan_id as "loanId", COALESCE(SUM(interest_component), 0)::text as "totalInterest"
+      FROM public.loan_payments
+      WHERE user_id = $1
+      GROUP BY loan_id
+      `,
+      [userId],
+      userId
+    )
+    const paidInterestMap = new Map<string, number>()
+    paidInterestResult.rows.forEach((row) => paidInterestMap.set(row.loanId, Number(row.totalInterest) || 0))
+
+    for (const loan of loansResult.rows) {
+      const outstandingPrincipal = Number(loan.outstandingPrincipal) || 0
+      const modeled = parseStoredSinglePaymentLoanModel(loan.notes)
+      let dueAmount = outstandingPrincipal
+
+      if (modeled) {
+        const modeledTotalDue = Number(modeled.total_due) || 0
+        const modeledInterest = Math.max(0, modeledTotalDue - (Number(loan.principal) || 0))
+        const paidInterest = paidInterestMap.get(loan.id) || 0
+        dueAmount += Math.max(0, modeledInterest - paidInterest)
+      }
+
+      obligations.push({
+        id: `loan:${loan.id}`,
+        kind: 'loan',
+        title: `LOAN DUE - ${loan.lenderName}`,
+        amount: roundMoney(dueAmount),
+        dueDate: loan.dueDate,
+      })
+    }
+
+    const recurringRootsResult = await query<
+      Pick<Transaction, 'id' | 'category' | 'amount' | 'description' | 'date' | 'type'> & {
+        recurrenceRule: 'weekly' | 'monthly'
+        recurrenceEndDate: string | null
+      }
+    >(
+      `
+      SELECT
+        id,
+        type,
+        amount,
+        category,
+        description,
+        date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate"
+      FROM public.transactions
+      WHERE
+        user_id = $1
+        AND recurrence_rule IS NOT NULL
+        AND parent_transaction_id IS NULL
+        AND type IN ('expense', 'transfer')
+      `,
+      [userId],
+      userId
+    )
+
+    for (const root of recurringRootsResult.rows) {
+      const maxExistingResult = await query<{ maxDate: string | null }>(
+        `
+        SELECT MAX(date)::text as "maxDate"
+        FROM public.transactions
+        WHERE user_id = $1 AND (id = $2 OR parent_transaction_id = $2)
+        `,
+        [userId, root.id],
+        userId
+      )
+
+      let nextDate = maxExistingResult.rows[0]?.maxDate || root.date
+      while (true) {
+        nextDate = root.recurrenceRule === 'weekly' ? addDays(nextDate, 7) : addMonthsDateOnly(nextDate, 1)
+        if (nextDate > rangeEnd) break
+        if (root.recurrenceEndDate && nextDate > root.recurrenceEndDate) break
+        if (nextDate < today) continue
+
+        obligations.push({
+          id: `recurring:${root.id}:${nextDate}`,
+          kind: 'recurring-expense',
+          title: root.description || root.category,
+          amount: Number(root.amount) || 0,
+          dueDate: nextDate,
+        })
+      }
+    }
+
+    return obligations.sort((a, b) => (a.dueDate === b.dueDate ? b.amount - a.amount : a.dueDate.localeCompare(b.dueDate)))
+  } catch (error) {
+    console.error('Error fetching upcoming obligations:', error)
+    throw error
+  }
+}
+
 export async function addLoan(
   userId: string,
   loan: Omit<Loan, 'id' | 'createdAt' | 'outstandingPrincipal' | 'status'>
@@ -909,7 +1331,7 @@ export async function addLoan(
       VALUES (
         gen_random_uuid(),
         $1,
-        'income',
+        'transfer',
         $2,
         'Loan Disbursement',
         $3,

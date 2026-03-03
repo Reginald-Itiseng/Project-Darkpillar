@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const { category, amount, month } = body
+    const { category, amount, month, isRecurring } = body
 
     // Validation
     if (!category || amount === undefined || amount === null || !month) {
@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
       category: normalizedCategory,
       amount: parsedAmount,
       month: normalizedMonth,
+      isRecurring: Boolean(isRecurring),
     })
 
     return NextResponse.json({ budget }, { status: 201 })
@@ -151,7 +152,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const { amount } = body
+    const { amount, isRecurring } = body
 
     const parsedAmount = Number(amount)
     if (amount === undefined || amount === null || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
@@ -163,7 +164,10 @@ export async function PUT(request: NextRequest) {
 
     await ensureFinancialUserLink(userId)
 
-    const budget = await updateBudget(userId, budgetId, { amount: parsedAmount })
+    const budget = await updateBudget(userId, budgetId, {
+      amount: parsedAmount,
+      ...(isRecurring !== undefined ? { isRecurring: Boolean(isRecurring) } : {}),
+    })
 
     if (!budget) {
       return NextResponse.json(

@@ -34,6 +34,10 @@ function normalizeTransaction(raw: any): Transaction {
   return {
     ...raw,
     amount: toNumber(raw?.amount),
+    recurrenceRule: raw?.recurrenceRule || undefined,
+    recurrenceEndDate: raw?.recurrenceEndDate || undefined,
+    parentTransactionId: raw?.parentTransactionId || undefined,
+    isSystemGenerated: Boolean(raw?.isSystemGenerated),
   } as Transaction
 }
 
@@ -42,6 +46,7 @@ function normalizeBudget(raw: any): Budget {
     ...raw,
     amount: toNumber(raw?.amount),
     spent: toNumber(raw?.spent),
+    isRecurring: Boolean(raw?.isRecurring),
   } as Budget
 }
 
@@ -290,6 +295,33 @@ export async function addTransaction(transaction: Omit<Transaction, 'id' | 'crea
 
   const data = await response.json()
   return normalizeTransaction(data.transaction)
+}
+
+export async function getUpcomingObligations(daysAhead = 30): Promise<Array<{
+  id: string
+  kind: 'loan' | 'recurring-expense'
+  title: string
+  amount: number
+  dueDate: string
+}>> {
+  const response = await fetch(`/api/financial/obligations?days=${daysAhead}`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to fetch upcoming obligations'))
+  }
+
+  const data = await response.json()
+  return (data.obligations || []).map((item: any) => ({
+    id: String(item.id),
+    kind: item.kind === 'loan' ? 'loan' : 'recurring-expense',
+    title: String(item.title || ''),
+    amount: toNumber(item.amount),
+    dueDate: String(item.dueDate || ''),
+  }))
 }
 
 export async function deleteTransaction(id: string): Promise<void> {

@@ -29,6 +29,10 @@ export interface Transaction {
   accountId: string
   toAccountId?: string
   date: string
+  recurrenceRule?: "weekly" | "monthly"
+  recurrenceEndDate?: string
+  parentTransactionId?: string
+  isSystemGenerated?: boolean
   createdAt: string
 }
 
@@ -38,6 +42,7 @@ export interface Budget {
   amount: number
   spent: number
   month: string // YYYY-MM format
+  isRecurring?: boolean
   createdAt: string
 }
 

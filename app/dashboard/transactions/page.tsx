@@ -48,7 +48,7 @@ export default function TransactionsPage() {
 
   const currentMonth = getCurrentMonth()
   const monthlyIncome = transactions
-    .filter((t) => t.type === "income" && t.date.startsWith(currentMonth))
+    .filter((t) => t.type === "income" && t.date.startsWith(currentMonth) && t.category !== "Loan Disbursement")
     .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
   const monthlyExpenses = transactions
     .filter((t) => t.type === "expense" && t.date.startsWith(currentMonth))
@@ -303,6 +303,8 @@ function TransactionModal({
   const [accountId, setAccountId] = useState(accounts[0]?.id || "")
   const [toAccountId, setToAccountId] = useState("")
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
+  const [recurrenceRule, setRecurrenceRule] = useState<"" | "weekly" | "monthly">("")
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState("")
   const [error, setError] = useState("")
   const [showNewCategory, setShowNewCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
@@ -348,6 +350,8 @@ function TransactionModal({
         accountId,
         toAccountId: type === "transfer" ? toAccountId : undefined,
         date,
+        recurrenceRule: type === "transfer" ? undefined : recurrenceRule || undefined,
+        recurrenceEndDate: type === "transfer" ? undefined : recurrenceEndDate || undefined,
       })
 
       await onSave()
@@ -558,6 +562,37 @@ function TransactionModal({
               placeholder="TRANSACTION DETAILS..."
             />
           </div>
+
+          {type !== "transfer" && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="font-mono text-xs text-muted-foreground block mb-2">REPEAT</label>
+                <select
+                  value={recurrenceRule}
+                  onChange={(e) => {
+                    const value = e.target.value as "" | "weekly" | "monthly"
+                    setRecurrenceRule(value)
+                    if (!value) setRecurrenceEndDate("")
+                  }}
+                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                >
+                  <option value="">DO NOT REPEAT</option>
+                  <option value="weekly">WEEKLY</option>
+                  <option value="monthly">MONTHLY</option>
+                </select>
+              </div>
+              <div>
+                <label className="font-mono text-xs text-muted-foreground block mb-2">REPEAT UNTIL (OPTIONAL)</label>
+                <input
+                  type="date"
+                  value={recurrenceEndDate}
+                  onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                  disabled={!recurrenceRule}
+                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
+                />
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">

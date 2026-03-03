@@ -322,6 +322,7 @@ function BudgetModal({
 }) {
   const [category, setCategory] = useState(budget?.category || categories[0]?.name || "")
   const [amount, setAmount] = useState(budget?.amount?.toString() || "")
+  const [isRecurring, setIsRecurring] = useState(Boolean(budget?.isRecurring))
   const [error, setError] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -340,12 +341,13 @@ function BudgetModal({
 
     try {
       if (budget) {
-        await apiStorage.updateBudget(budget.id, { amount: Number.parseFloat(amount) })
+        await apiStorage.updateBudget(budget.id, { amount: Number.parseFloat(amount), isRecurring })
       } else {
         await apiStorage.addBudget({
           category,
           amount: Number.parseFloat(amount),
           month,
+          isRecurring,
         })
       }
 
@@ -402,6 +404,16 @@ function BudgetModal({
               placeholder="0.00"
             />
           </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              onChange={(e) => setIsRecurring(e.target.checked)}
+              className="w-4 h-4 accent-primary"
+            />
+            <span className="font-mono text-xs text-muted-foreground">REPEAT THIS BUDGET MONTHLY</span>
+          </label>
 
           {error && (
             <div className="p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">

@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const { type, amount, category, description, accountId, toAccountId, date } = body
+    const { type, amount, category, description, accountId, toAccountId, date, recurrenceRule, recurrenceEndDate } = body
 
     // Validation
     if (!type || amount === undefined || amount === null || !category || !accountId || !date) {
@@ -131,6 +131,36 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const normalizedRecurrenceRule = recurrenceRule ? String(recurrenceRule).trim() : undefined
+    const normalizedRecurrenceEndDate = recurrenceEndDate ? String(recurrenceEndDate).trim() : undefined
+    if (normalizedRecurrenceRule && !['weekly', 'monthly'].includes(normalizedRecurrenceRule)) {
+      return NextResponse.json(
+        { error: 'recurrenceRule must be weekly or monthly' },
+        { status: 400 }
+      )
+    }
+
+    if (normalizedRecurrenceRule && type === 'transfer') {
+      return NextResponse.json(
+        { error: 'Recurring transfer is not supported via this form' },
+        { status: 400 }
+      )
+    }
+
+    if (normalizedRecurrenceEndDate && !isValidDateOnly(normalizedRecurrenceEndDate)) {
+      return NextResponse.json(
+        { error: 'recurrenceEndDate must use YYYY-MM-DD format' },
+        { status: 400 }
+      )
+    }
+
+    if (normalizedRecurrenceEndDate && normalizedRecurrenceEndDate < normalizedDate) {
+      return NextResponse.json(
+        { error: 'recurrenceEndDate cannot be before transaction date' },
+        { status: 400 }
+      )
+    }
+
     await ensureFinancialUserLink(userId)
 
     const transaction = await addTransaction(userId, {
@@ -141,6 +171,8 @@ export async function POST(request: NextRequest) {
       accountId: normalizedAccountId,
       toAccountId: normalizedToAccountId,
       date: normalizedDate,
+      recurrenceRule: normalizedRecurrenceRule as Transaction['recurrenceRule'],
+      recurrenceEndDate: normalizedRecurrenceEndDate,
     })
 
     return NextResponse.json({ transaction }, { status: 201 })
