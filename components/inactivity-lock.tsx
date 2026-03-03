@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { ShieldAlert } from "lucide-react"
 import * as apiStorage from "@/lib/api-storage"
 
 const STORAGE_KEY_TIMEOUT = "inactivity_lock_timeout_ms"
@@ -148,15 +149,24 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
 
       {locked && (
         <div className="fixed inset-0 z-[80] bg-background/95 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-card border border-border rounded-lg overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <h2 className="font-mono text-sm text-foreground">SESSION LOCKED</h2>
+          <div className="w-full max-w-md bg-card border border-border rounded-lg overflow-hidden shadow-2xl shadow-primary/10">
+            <div className="p-4 border-b border-border bg-gradient-to-r from-secondary/70 to-card">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="relative w-12 h-12 rounded-full border border-primary/40 bg-primary/10 flex items-center justify-center">
+                  <div className="absolute inset-1 rounded-full border border-primary/30" />
+                  <ShieldAlert className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-mono text-sm text-foreground">SECURITY LOCK ENGAGED</h2>
+                  <p className="font-mono text-[11px] text-warning">SCP CONTAINMENT PROTOCOL ACTIVE</p>
+                </div>
+              </div>
               <p className="font-mono text-xs text-muted-foreground mt-1">
                 {hint}
               </p>
             </div>
-            <div className="px-4 pt-4 pb-1 font-mono text-[11px] text-muted-foreground">
-              ******** ******** ******** ********
+            <div className="px-4 pt-4 pb-1 font-mono text-[11px] text-muted-foreground tracking-widest">
+              ********  ********  ********  ********
             </div>
             <form onSubmit={handleUnlock} className="p-4 space-y-4">
               <div>
@@ -176,6 +186,10 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
                 </div>
               )}
 
+              <div className="p-2 border border-border rounded bg-secondary/40 font-mono text-[11px] text-muted-foreground">
+                AUTHORIZED PERSONNEL ONLY. UNAUTHORIZED ACCESS IS LOGGED.
+              </div>
+
               <button
                 type="submit"
                 disabled={unlocking}
@@ -190,4 +204,3 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
     </div>
   )
 }
-
