@@ -29,6 +29,18 @@ function getSavedTimeout(): number {
   return Number.isFinite(parsed) && parsed >= 30000 ? parsed : DEFAULT_TIMEOUT_MS
 }
 
+function buildMatrixColumns(columnCount: number): string[] {
+  const glyphs = "01ABCDEF#$%&@"
+  return Array.from({ length: columnCount }, (_, colIndex) => {
+    const size = 48 + ((colIndex * 17) % 38)
+    let line = ""
+    for (let i = 0; i < size; i++) {
+      line += glyphs[(i * 13 + colIndex * 7) % glyphs.length]
+    }
+    return line
+  })
+}
+
 export function InactivityLock({ children }: { children: React.ReactNode }) {
   const [timeoutMs, setTimeoutMs] = useState<number>(DEFAULT_TIMEOUT_MS)
   const [locked, setLocked] = useState(false)
@@ -36,6 +48,7 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("")
   const [unlocking, setUnlocking] = useState(false)
   const [identifier, setIdentifier] = useState("")
+  const matrixColumns = useMemo(() => buildMatrixColumns(28), [])
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const hint = useMemo(() => {
@@ -149,6 +162,39 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
 
       {locked && (
         <div className="fixed inset-0 z-[80] bg-background/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.12),transparent_60%)]" />
+            {matrixColumns.map((column, index) => (
+              <div
+                key={index}
+                className="absolute top-[-140%] whitespace-pre font-mono text-[10px] leading-[10px] text-primary/25 animate-[matrix_fall_linear_infinite]"
+                style={{
+                  left: `${(index / matrixColumns.length) * 100}%`,
+                  animationDuration: `${9 + (index % 7)}s`,
+                  animationDelay: `${-(index % 5)}s`,
+                  textShadow: "0 0 8px rgba(34,197,94,0.35)",
+                }}
+              >
+                {`${column}\n${column}\n${column}`}
+              </div>
+            ))}
+            <style jsx>{`
+              @keyframes matrix_fall {
+                0% {
+                  transform: translateY(0);
+                  opacity: 0;
+                }
+                10% {
+                  opacity: 0.4;
+                }
+                100% {
+                  transform: translateY(240%);
+                  opacity: 0;
+                }
+              }
+            `}</style>
+          </div>
+
           <div className="w-full max-w-md bg-card border border-border rounded-lg overflow-hidden shadow-2xl shadow-primary/10">
             <div className="p-4 border-b border-border bg-gradient-to-r from-secondary/70 to-card">
               <div className="flex items-center gap-3 mb-2">
