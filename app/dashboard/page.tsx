@@ -10,9 +10,28 @@ import type { Budget, Goal, Transaction } from "@/lib/types"
 import { formatCurrency, getCurrentMonth, getMonthName } from "@/lib/utils"
 import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 
+const LOAN_MODEL_PREFIX = "__SINGLE_PAYMENT_MODEL__:"
+
+function getModeledTotalDue(notes?: string): number | null {
+  if (!notes) return null
+  const firstLine = notes.split("\n")[0] || ""
+  if (!firstLine.startsWith(LOAN_MODEL_PREFIX)) return null
+
+  try {
+    const parsed = JSON.parse(firstLine.slice(LOAN_MODEL_PREFIX.length)) as { total_due?: unknown; kind?: unknown }
+    if (parsed?.kind !== "single-payment") return null
+    const totalDue = Number(parsed.total_due)
+    return Number.isFinite(totalDue) && totalDue > 0 ? totalDue : null
+  } catch {
+    return null
+  }
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState({
     totalBalance: 0,
+    totalLiabilities: 0,
+    netWorth: 0,
     monthlyIncome: 0,
     monthlyExpenses: 0,
     activeGoals: 0,
@@ -24,12 +43,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const loadDashboardData = async () => {
-      const [userData, accounts, transactions, budgets, goals] = await Promise.all([
+      const [userData, accounts, transactions, budgets, goals, loanData] = await Promise.all([
         apiStorage.verifySession(),
         apiStorage.getAccounts(),
         apiStorage.getTransactions(),
         apiStorage.getBudgets(),
         apiStorage.getGoals(),
+        apiStorage.getLoans(),
       ])
 
       if (userData) {
@@ -53,6 +73,33 @@ export default function DashboardPage() {
         .filter((t) => t.type === "expense")
         .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
 
+      const paidInterestByLoanId = new Map<string, number>()
+      loanData.payments.forEach((payment) => {
+        paidInterestByLoanId.set(
+          payment.loanId,
+          (paidInterestByLoanId.get(payment.loanId) || 0) + (Number(payment.interestComponent) || 0),
+        )
+      })
+
+      const totalLiabilities = loanData.loans
+        .filter((loan) => loan.status === "active")
+        .reduce((sum, loan) => {
+          const outstandingPrincipal = Number(loan.outstandingPrincipal) || 0
+          const modeledTotalDue = getModeledTotalDue(loan.notes)
+
+          if (!modeledTotalDue) {
+            return sum + outstandingPrincipal
+          }
+
+          const principal = Number(loan.principal) || 0
+          const modeledInterest = Math.max(0, modeledTotalDue - principal)
+          const paidInterest = paidInterestByLoanId.get(loan.id) || 0
+          const remainingInterest = Math.max(0, modeledInterest - paidInterest)
+          return sum + outstandingPrincipal + remainingInterest
+        }, 0)
+
+      const netWorth = totalBalance - totalLiabilities
+
       const activeGoals = goals.filter((g: Goal) => g.status === "active").length
 
       const currentBudgets = budgets.filter((b) => b.month === currentMonth)
@@ -68,6 +115,8 @@ export default function DashboardPage() {
 
       setStats({
         totalBalance,
+        totalLiabilities,
+        netWorth,
         monthlyIncome,
         monthlyExpenses,
         activeGoals,
@@ -114,13 +163,27 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
             <StatCard
               title="TOTAL ASSETS"
               value={formatCurrency(stats.totalBalance)}
               icon={Wallet}
               color="primary"
-              subtitle="ALL ACTIVE ACCOUNTS"
+              subtitle="CASH IN ACTIVE ACCOUNTS"
+            />
+            <StatCard
+              title="TOTAL LIABILITIES"
+              value={formatCurrency(stats.totalLiabilities)}
+              icon={AlertTriangle}
+              color="warning"
+              subtitle="LOAN PRINCIPAL + MODELED INTEREST DUE"
+            />
+            <StatCard
+              title="NET WORTH"
+              value={formatCurrency(stats.netWorth)}
+              icon={stats.netWorth >= 0 ? CheckCircle : AlertTriangle}
+              color={stats.netWorth >= 0 ? "success" : "destructive"}
+              subtitle="ASSETS - LIABILITIES"
             />
             <StatCard
               title="MONTHLY INCOME"
@@ -276,7 +339,7 @@ function StatCard({
   title: string
   value: string
   icon: React.ElementType
-  color: "primary" | "success" | "destructive" | "accent"
+  color: "primary" | "success" | "destructive" | "accent" | "warning"
   subtitle: string
 }) {
   const colorClasses = {
@@ -284,6 +347,7 @@ function StatCard({
     success: "text-success bg-success/10 border-success/30",
     destructive: "text-destructive bg-destructive/10 border-destructive/30",
     accent: "text-accent bg-accent/10 border-accent/30",
+    warning: "text-warning bg-warning/10 border-warning/30",
   }
 
   return (

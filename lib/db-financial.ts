@@ -10,8 +10,30 @@ interface LoanPaymentInput {
   note?: string
 }
 
+interface StoredSinglePaymentLoanModel {
+  kind: 'single-payment'
+  total_due: number
+}
+
+const LOAN_MODEL_PREFIX = '__SINGLE_PAYMENT_MODEL__:'
+
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100
+}
+
+function parseStoredSinglePaymentLoanModel(notes?: string): StoredSinglePaymentLoanModel | null {
+  if (!notes) return null
+  const firstLine = notes.split('\n')[0] || ''
+  if (!firstLine.startsWith(LOAN_MODEL_PREFIX)) return null
+
+  try {
+    const parsed = JSON.parse(firstLine.slice(LOAN_MODEL_PREFIX.length)) as StoredSinglePaymentLoanModel
+    if (parsed?.kind !== 'single-payment') return null
+    if (!Number.isFinite(Number(parsed.total_due)) || Number(parsed.total_due) <= 0) return null
+    return parsed
+  } catch {
+    return null
+  }
 }
 
 // ============================================================================
@@ -1013,8 +1035,29 @@ export async function addLoanPayment(
     const elapsedDays = Math.max(0, Math.floor((endTs - startTs) / (1000 * 60 * 60 * 24)))
 
     const accruedInterest = roundMoney((outstanding * annualRate * elapsedDays) / 36500)
+    const singlePaymentModel = parseStoredSinglePaymentLoanModel(loan.notes)
+    let modeledInterestToApply: number | undefined
+
+    if (singlePaymentModel) {
+      const modeledTotalDue = roundMoney(Number(singlePaymentModel.total_due))
+      const totalModeledInterest = roundMoney(Math.max(0, modeledTotalDue - (Number(loan.principal) || 0)))
+      const paidInterestResult = await client.query<{ total: string | null }>(
+        `
+        SELECT COALESCE(SUM(interest_component), 0)::text as total
+        FROM public.loan_payments
+        WHERE loan_id = $1 AND user_id = $2
+        `,
+        [payment.loanId, userId]
+      )
+      const paidInterestSoFar = roundMoney(Number(paidInterestResult.rows[0]?.total || 0))
+      const remainingModeledInterest = roundMoney(Math.max(0, totalModeledInterest - paidInterestSoFar))
+      modeledInterestToApply = Math.min(totalAmount, remainingModeledInterest)
+    }
+
     const explicitInterest = payment.interestComponent !== undefined ? roundMoney(payment.interestComponent) : undefined
-    const interestComponent = explicitInterest ?? Math.min(totalAmount, accruedInterest)
+    const interestComponent =
+      explicitInterest ??
+      (modeledInterestToApply !== undefined ? modeledInterestToApply : Math.min(totalAmount, accruedInterest))
     const principalComponent = roundMoney(totalAmount - interestComponent)
 
     if (interestComponent < 0 || principalComponent < 0) {

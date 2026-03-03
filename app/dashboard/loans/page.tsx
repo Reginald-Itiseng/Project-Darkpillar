@@ -426,15 +426,15 @@ function LoanModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg w-full max-w-lg overflow-hidden">
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="font-mono text-sm text-foreground">{isEdit ? "EDIT LOAN" : "NEW LOAN"}</h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto">
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">LOAN TYPE</label>
             <select
@@ -674,15 +674,15 @@ function PaymentModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg w-full max-w-md overflow-hidden">
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="font-mono text-sm text-foreground">RECORD PAYMENT</h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto">
           <div className="p-3 bg-secondary/40 border border-border rounded">
             <div className="font-mono text-xs text-muted-foreground">LOAN</div>
             <div className="font-mono text-sm text-foreground">{loan.lenderName}</div>
@@ -723,6 +723,9 @@ function PaymentModal({
                 placeholder="AUTO IF BLANK"
               />
             </div>
+          </div>
+          <div className="font-mono text-[11px] text-muted-foreground">
+            FOR SINGLE-PAYMENT MODELED LOANS, LEAVE INTEREST BLANK TO AUTO-POST THE FIXED INTEREST AS "LOAN INTEREST" EXPENSE.
           </div>
 
           <div>

@@ -418,8 +418,8 @@ function GoalModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg w-full max-w-md overflow-hidden">
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="font-mono text-sm text-foreground">{goal ? "MODIFY OBJECTIVE" : "NEW MISSION OBJECTIVE"}</h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
@@ -427,7 +427,7 @@ function GoalModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto">
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">OBJECTIVE NAME</label>
             <input
@@ -566,8 +566,8 @@ function ContributeModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg w-full max-w-sm overflow-hidden">
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-sm max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="font-mono text-sm text-foreground">ADD FUNDS</h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
@@ -575,7 +575,7 @@ function ContributeModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto">
           <div className="p-3 bg-secondary/50 rounded border border-border">
             <div className="font-mono text-xs text-muted-foreground mb-1">OBJECTIVE</div>
             <div className="font-mono text-sm text-foreground">{goal.name}</div>
