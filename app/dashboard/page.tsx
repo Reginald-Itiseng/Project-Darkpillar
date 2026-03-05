@@ -6,9 +6,9 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
-import type { Account, AccountBalanceSnapshot, Budget, Goal, Transaction } from "@/lib/types"
+import type { Account, AccountBalanceSnapshot, Budget, Goal, IncomeClaim, Loan, Transaction } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth, getMonthName } from "@/lib/utils"
-import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
+import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock, Plus, X } from "lucide-react"
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 const LOAN_MODEL_PREFIX = "__SINGLE_PAYMENT_MODEL__:"
@@ -48,21 +48,29 @@ export default function DashboardPage() {
     dueDate: string
   }>>([])
   const [accountsIndex, setAccountsIndex] = useState<Account[]>([])
+  const [activeLoans, setActiveLoans] = useState<Loan[]>([])
+  const [incomeClaims, setIncomeClaims] = useState<IncomeClaim[]>([])
+  const [showIncomeClaimModal, setShowIncomeClaimModal] = useState(false)
+  const [isSavingIncomeClaim, setIsSavingIncomeClaim] = useState(false)
+  const [selectedIncomeClaimId, setSelectedIncomeClaimId] = useState("")
+  const [selectedLoanId, setSelectedLoanId] = useState("")
+  const [plannedExtraLoanPayment, setPlannedExtraLoanPayment] = useState("")
   const [reconciliationSnapshots, setReconciliationSnapshots] = useState<AccountBalanceSnapshot[]>([])
   const [selectedReconciliationAccountId, setSelectedReconciliationAccountId] = useState("")
   const [user, setUserState] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     const loadDashboardData = async () => {
-      const [userData, accounts, transactions, budgets, goals, loanData, obligations, snapshots] = await Promise.all([
+      const [userData, accounts, transactions, budgets, goals, loanData, obligations, snapshots, claims] = await Promise.all([
         apiStorage.verifySession(),
         apiStorage.getAccounts(),
         apiStorage.getTransactions(),
         apiStorage.getBudgets(),
         apiStorage.getGoals(),
         apiStorage.getLoans(),
-        apiStorage.getUpcomingObligations(30),
+        apiStorage.getUpcomingObligations(90),
         apiStorage.getAccountBalanceSnapshots(),
+        apiStorage.getIncomeClaims(),
       ])
 
       if (userData) {
@@ -149,8 +157,21 @@ export default function DashboardPage() {
         .sort((a, b) => b.percentage - a.percentage)
 
       setBudgetAlerts(alerts)
-      setUpcomingObligations(obligations.slice(0, 8))
+      setUpcomingObligations(obligations)
       setAccountsIndex(accounts)
+      const nextActiveLoans = loanData.loans.filter((loan) => loan.status === "active")
+      setActiveLoans(nextActiveLoans)
+      const nextClaims = claims.sort((a, b) => a.expectedPayDate.localeCompare(b.expectedPayDate))
+      setIncomeClaims(nextClaims)
+      if (!selectedIncomeClaimId) {
+        const firstPending = nextClaims.find((claim) => claim.status === "pending")
+        if (firstPending) {
+          setSelectedIncomeClaimId(firstPending.id)
+        }
+      }
+      if (!selectedLoanId && nextActiveLoans[0]?.id) {
+        setSelectedLoanId(nextActiveLoans[0].id)
+      }
       setReconciliationSnapshots(snapshots)
       if (!selectedReconciliationAccountId && accounts[0]?.id) {
         setSelectedReconciliationAccountId(accounts[0].id)
@@ -159,6 +180,46 @@ export default function DashboardPage() {
 
     void loadDashboardData()
   }, [selectedReconciliationAccountId])
+
+  const pendingIncomeClaims = incomeClaims.filter((claim) => claim.status === "pending")
+  const pendingIncomeTotal = pendingIncomeClaims.reduce((sum, claim) => sum + (Number(claim.expectedAmount) || 0), 0)
+  const selectedIncomeClaim = pendingIncomeClaims.find((claim) => claim.id === selectedIncomeClaimId) || null
+  const selectedLoan = activeLoans.find((loan) => loan.id === selectedLoanId) || null
+  const extraLoanPaymentAmount = Math.max(0, Number(plannedExtraLoanPayment) || 0)
+  const obligationsByPayDate = selectedIncomeClaim
+    ? upcomingObligations
+        .filter((item) => item.dueDate <= selectedIncomeClaim.expectedPayDate)
+        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+    : 0
+  const projectedAfterObligations = selectedIncomeClaim ? Number(selectedIncomeClaim.expectedAmount) - obligationsByPayDate : 0
+  const projectedAfterLoanPlan = projectedAfterObligations - extraLoanPaymentAmount
+
+  const handleAddIncomeClaim = async (payload: {
+    organizationName: string
+    accountId: string
+    hoursWorked: number
+    hourlyRate: number
+    expectedAmount?: number
+    submittedDate: string
+    expectedPayDate: string
+    notes?: string
+  }) => {
+    setIsSavingIncomeClaim(true)
+    try {
+      await apiStorage.addIncomeClaim(payload)
+      setShowIncomeClaimModal(false)
+      const refreshedClaims = await apiStorage.getIncomeClaims()
+      const nextClaims = refreshedClaims.sort((a, b) => a.expectedPayDate.localeCompare(b.expectedPayDate))
+      setIncomeClaims(nextClaims)
+      const firstPending = nextClaims.find((claim) => claim.status === "pending")
+      if (firstPending) setSelectedIncomeClaimId(firstPending.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to add income claim"
+      alert(message)
+    } finally {
+      setIsSavingIncomeClaim(false)
+    }
+  }
 
   const snapshotsForSelectedAccount = reconciliationSnapshots
     .filter((snapshot) => snapshot.accountId === selectedReconciliationAccountId)
@@ -203,13 +264,13 @@ export default function DashboardPage() {
           <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h2 className="font-mono text-sm text-foreground">UPCOMING OBLIGATIONS</h2>
-              <span className="font-mono text-xs text-muted-foreground">NEXT 30 DAYS</span>
+              <span className="font-mono text-xs text-muted-foreground">NEXT 90 DAYS</span>
             </div>
             <div className="divide-y divide-border">
               {upcomingObligations.length === 0 ? (
                 <div className="p-8 text-center font-mono text-sm text-muted-foreground">NO UPCOMING OBLIGATIONS</div>
               ) : (
-                upcomingObligations.map((item) => (
+                upcomingObligations.slice(0, 8).map((item) => (
                   <div key={item.id} className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors">
                     <div>
                       <div className="font-mono text-sm text-foreground">{item.title}</div>
@@ -218,6 +279,125 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <div className="font-mono text-sm text-warning">{formatCurrency(item.amount)}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between gap-4">
+              <div>
+                <h2 className="font-mono text-sm text-foreground">PENDING INCOME CLAIMS</h2>
+                <p className="font-mono text-xs text-muted-foreground mt-1">
+                  SUBMITTED HOURS TRACKED BEFORE CASH IS CREDITED
+                </p>
+              </div>
+              <button
+                onClick={() => setShowIncomeClaimModal(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded border border-primary text-primary font-mono text-xs hover:bg-primary/10 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                LOG CLAIM
+              </button>
+            </div>
+
+            <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 border-b border-border">
+              <div className="p-3 bg-secondary/40 border border-border rounded">
+                <div className="font-mono text-xs text-muted-foreground">PENDING CLAIMS</div>
+                <div className="font-mono text-sm text-foreground">{pendingIncomeClaims.length}</div>
+              </div>
+              <div className="p-3 bg-secondary/40 border border-border rounded">
+                <div className="font-mono text-xs text-muted-foreground">TOTAL EXPECTED</div>
+                <div className="font-mono text-sm text-success">{formatCurrency(pendingIncomeTotal)}</div>
+              </div>
+              <div className="p-3 bg-secondary/40 border border-border rounded">
+                <div className="font-mono text-xs text-muted-foreground">NEXT PAY DATE</div>
+                <div className="font-mono text-sm text-foreground">
+                  {pendingIncomeClaims[0] ? formatDate(pendingIncomeClaims[0].expectedPayDate) : "N/A"}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-b border-border">
+              <h3 className="font-mono text-xs text-muted-foreground mb-3">INCOME-TO-DEBT FORECAST</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 mb-3">
+                <select
+                  value={selectedIncomeClaimId}
+                  onChange={(e) => setSelectedIncomeClaimId(e.target.value)}
+                  className="bg-secondary border border-border rounded px-3 py-2 font-mono text-xs text-foreground"
+                >
+                  <option value="">SELECT CLAIM</option>
+                  {pendingIncomeClaims.map((claim) => (
+                    <option key={claim.id} value={claim.id}>
+                      {claim.organizationName} | {formatCurrency(claim.expectedAmount)} | {claim.expectedPayDate}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={selectedLoanId}
+                  onChange={(e) => setSelectedLoanId(e.target.value)}
+                  className="bg-secondary border border-border rounded px-3 py-2 font-mono text-xs text-foreground"
+                >
+                  <option value="">OPTIONAL: CHOOSE LOAN</option>
+                  {activeLoans.map((loan) => (
+                    <option key={loan.id} value={loan.id}>
+                      {loan.lenderName} | OUTSTANDING {formatCurrency(loan.outstandingPrincipal)}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={plannedExtraLoanPayment}
+                  onChange={(e) => setPlannedExtraLoanPayment(e.target.value)}
+                  placeholder="EXTRA LOAN PAYMENT"
+                  className="bg-secondary border border-border rounded px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
+                />
+
+                <div className="px-3 py-2 bg-secondary border border-border rounded font-mono text-xs text-muted-foreground">
+                  {selectedLoan ? `LOAN PICKED: ${selectedLoan.lenderName}` : "NO LOAN SELECTED"}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="p-3 bg-secondary/40 border border-border rounded">
+                  <div className="font-mono text-xs text-muted-foreground">CLAIM EXPECTED</div>
+                  <div className="font-mono text-sm text-success">
+                    {selectedIncomeClaim ? formatCurrency(selectedIncomeClaim.expectedAmount) : formatCurrency(0)}
+                  </div>
+                </div>
+                <div className="p-3 bg-secondary/40 border border-border rounded">
+                  <div className="font-mono text-xs text-muted-foreground">OBLIGATIONS BY PAY DATE</div>
+                  <div className="font-mono text-sm text-warning">{formatCurrency(obligationsByPayDate)}</div>
+                </div>
+                <div className="p-3 bg-secondary/40 border border-border rounded">
+                  <div className="font-mono text-xs text-muted-foreground">PROJECTED LEFT AFTER PLAN</div>
+                  <div className={`font-mono text-sm ${projectedAfterLoanPlan >= 0 ? "text-primary" : "text-destructive"}`}>
+                    {formatCurrency(projectedAfterLoanPlan)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="divide-y divide-border">
+              {pendingIncomeClaims.length === 0 ? (
+                <div className="p-8 text-center font-mono text-sm text-muted-foreground">
+                  NO PENDING CLAIMS. LOG A CLAIM WHEN YOU SUBMIT YOUR TIMESHEET.
+                </div>
+              ) : (
+                pendingIncomeClaims.slice(0, 6).map((claim) => (
+                  <div key={claim.id} className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors">
+                    <div>
+                      <div className="font-mono text-sm text-foreground">{claim.organizationName}</div>
+                      <div className="font-mono text-xs text-muted-foreground">
+                        SUBMITTED {formatDate(claim.submittedDate)} | EXPECTED {formatDate(claim.expectedPayDate)} | {claim.hoursWorked}H @ {formatCurrency(claim.hourlyRate)}
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm text-success">{formatCurrency(claim.expectedAmount)}</div>
                   </div>
                 ))
               )}
@@ -453,6 +633,14 @@ export default function DashboardPage() {
           </div>
         </main>
       </div>
+      {showIncomeClaimModal && (
+        <IncomeClaimModal
+          accounts={accountsIndex.filter((item) => item.isActive)}
+          onClose={() => setShowIncomeClaimModal(false)}
+          onSave={handleAddIncomeClaim}
+          isSaving={isSavingIncomeClaim}
+        />
+      )}
     </div>
   )
 }
@@ -488,6 +676,193 @@ function StatCard({
       </div>
       <div className="font-mono text-xs text-muted-foreground mb-1">{title}</div>
       <div className="font-mono text-2xl text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function IncomeClaimModal({
+  accounts,
+  onClose,
+  onSave,
+  isSaving,
+}: {
+  accounts: Account[]
+  onClose: () => void
+  onSave: (payload: {
+    organizationName: string
+    accountId: string
+    hoursWorked: number
+    hourlyRate: number
+    expectedAmount?: number
+    submittedDate: string
+    expectedPayDate: string
+    notes?: string
+  }) => Promise<void>
+  isSaving: boolean
+}) {
+  const [organizationName, setOrganizationName] = useState("")
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "")
+  const [hoursWorked, setHoursWorked] = useState("")
+  const [hourlyRate, setHourlyRate] = useState("")
+  const [expectedAmount, setExpectedAmount] = useState("")
+  const [submittedDate, setSubmittedDate] = useState(new Date().toISOString().split("T")[0])
+  const [expectedPayDate, setExpectedPayDate] = useState("")
+  const [notes, setNotes] = useState("")
+
+  const autoExpected = (Number(hoursWorked) || 0) * (Number(hourlyRate) || 0)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!organizationName || !accountId || !hoursWorked || !hourlyRate || !submittedDate || !expectedPayDate) return
+
+    await onSave({
+      organizationName,
+      accountId,
+      hoursWorked: Number(hoursWorked),
+      hourlyRate: Number(hourlyRate),
+      expectedAmount: expectedAmount ? Number(expectedAmount) : undefined,
+      submittedDate,
+      expectedPayDate,
+      notes: notes || undefined,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div className="w-full max-w-xl bg-card border border-border rounded-lg max-h-[90vh] overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h2 className="font-mono text-sm text-foreground">LOG PENDING INCOME CLAIM</h2>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-secondary transition-colors"
+            aria-label="Close"
+            disabled={isSaving}
+          >
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
+
+        <form onSubmit={(e) => void handleSubmit(e)} className="p-4 space-y-4 overflow-y-auto max-h-[calc(90vh-73px)]">
+          <div>
+            <label className="block font-mono text-xs text-muted-foreground mb-2">ORGANIZATION</label>
+            <input
+              value={organizationName}
+              onChange={(e) => setOrganizationName(e.target.value)}
+              required
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+            />
+          </div>
+
+          <div>
+            <label className="block font-mono text-xs text-muted-foreground mb-2">TARGET ACCOUNT (ON PAYDAY)</label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              required
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+            >
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-mono text-xs text-muted-foreground mb-2">HOURS WORKED</label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={hoursWorked}
+                onChange={(e) => setHoursWorked(e.target.value)}
+                required
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+              />
+            </div>
+            <div>
+              <label className="block font-mono text-xs text-muted-foreground mb-2">HOURLY RATE</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={hourlyRate}
+                onChange={(e) => setHourlyRate(e.target.value)}
+                required
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-mono text-xs text-muted-foreground mb-2">
+              EXPECTED AMOUNT (OPTIONAL OVERRIDE)
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={expectedAmount}
+              onChange={(e) => setExpectedAmount(e.target.value)}
+              placeholder={`AUTO: ${autoExpected.toFixed(2)}`}
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-mono text-xs text-muted-foreground mb-2">SUBMITTED DATE</label>
+              <input
+                type="date"
+                value={submittedDate}
+                onChange={(e) => setSubmittedDate(e.target.value)}
+                required
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+              />
+            </div>
+            <div>
+              <label className="block font-mono text-xs text-muted-foreground mb-2">EXPECTED PAY DATE</label>
+              <input
+                type="date"
+                value={expectedPayDate}
+                onChange={(e) => setExpectedPayDate(e.target.value)}
+                required
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-mono text-xs text-muted-foreground mb-2">NOTES (OPTIONAL)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="px-4 py-2 rounded border border-border font-mono text-xs text-muted-foreground hover:bg-secondary transition-colors"
+            >
+              CANCEL
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs hover:bg-primary/90 transition-colors disabled:opacity-60"
+            >
+              {isSaving ? "SAVING..." : "SAVE CLAIM"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

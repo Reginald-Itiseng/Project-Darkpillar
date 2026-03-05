@@ -1,4 +1,4 @@
-import type { User, Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot } from './types'
+import type { User, Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot, IncomeClaim } from './types'
 
 export interface AdminInvite {
   code: string
@@ -84,6 +84,16 @@ function normalizeAccountBalanceSnapshot(raw: any): AccountBalanceSnapshot {
     delta: toNumber(raw?.delta),
     note: raw?.note || undefined,
   } as AccountBalanceSnapshot
+}
+
+function normalizeIncomeClaim(raw: any): IncomeClaim {
+  return {
+    ...raw,
+    hoursWorked: toNumber(raw?.hoursWorked),
+    hourlyRate: toNumber(raw?.hourlyRate),
+    expectedAmount: toNumber(raw?.expectedAmount),
+    notes: raw?.notes || undefined,
+  } as IncomeClaim
 }
 
 function getSessionToken(): string | null {
@@ -369,6 +379,65 @@ export async function getUpcomingObligations(daysAhead = 30): Promise<Array<{
     amount: toNumber(item.amount),
     dueDate: String(item.dueDate || ''),
   }))
+}
+
+export async function getIncomeClaims(): Promise<IncomeClaim[]> {
+  const response = await fetch('/api/financial/income-claims', {
+    method: 'GET',
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to fetch income claims'))
+  }
+
+  const data = await response.json()
+  return (data.claims || []).map(normalizeIncomeClaim)
+}
+
+export async function addIncomeClaim(payload: {
+  organizationName: string
+  accountId: string
+  hoursWorked: number
+  hourlyRate: number
+  expectedAmount?: number
+  submittedDate: string
+  expectedPayDate: string
+  notes?: string
+}): Promise<IncomeClaim> {
+  const response = await fetch('/api/financial/income-claims', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to create income claim'))
+  }
+
+  const data = await response.json()
+  return normalizeIncomeClaim(data.claim)
+}
+
+export async function updateIncomeClaim(
+  id: string,
+  updates: Partial<Pick<IncomeClaim, 'expectedPayDate' | 'expectedAmount' | 'status' | 'notes'>>
+): Promise<IncomeClaim> {
+  const response = await fetch(`/api/financial/income-claims?id=${id}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(updates),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to update income claim'))
+  }
+
+  const data = await response.json()
+  return normalizeIncomeClaim(data.claim)
 }
 
 export async function deleteTransaction(id: string): Promise<void> {

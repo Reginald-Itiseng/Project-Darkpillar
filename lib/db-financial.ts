@@ -1,5 +1,5 @@
 import { query, transaction } from './db'
-import type { Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot } from './types'
+import type { Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot, IncomeClaim } from './types'
 
 interface LoanPaymentInput {
   loanId: string
@@ -1144,6 +1144,182 @@ export async function addAccountBalanceSnapshot(
     return result.rows[0]
   } catch (error) {
     console.error('Error creating account balance snapshot:', error)
+    throw error
+  }
+}
+
+export async function getIncomeClaims(userId: string): Promise<IncomeClaim[]> {
+  try {
+    const result = await query<IncomeClaim>(
+      `
+      SELECT
+        id,
+        organization_name as "organizationName",
+        account_id as "accountId",
+        hours_worked as "hoursWorked",
+        hourly_rate as "hourlyRate",
+        expected_amount as "expectedAmount",
+        submitted_date as "submittedDate",
+        expected_pay_date as "expectedPayDate",
+        status,
+        notes,
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      FROM public.income_claims
+      WHERE user_id = $1
+      ORDER BY expected_pay_date ASC, created_at DESC
+      `,
+      [userId],
+      userId
+    )
+    return result.rows
+  } catch (error) {
+    console.error('Error fetching income claims:', error)
+    throw error
+  }
+}
+
+export async function addIncomeClaim(
+  userId: string,
+  payload: {
+    organizationName: string
+    accountId: string
+    hoursWorked: number
+    hourlyRate: number
+    expectedAmount: number
+    submittedDate: string
+    expectedPayDate: string
+    notes?: string
+  }
+): Promise<IncomeClaim> {
+  try {
+    const result = await query<IncomeClaim>(
+      `
+      INSERT INTO public.income_claims (
+        id,
+        user_id,
+        organization_name,
+        account_id,
+        hours_worked,
+        hourly_rate,
+        expected_amount,
+        submitted_date,
+        expected_pay_date,
+        status,
+        notes,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        'pending',
+        $9,
+        NOW(),
+        NOW()
+      )
+      RETURNING
+        id,
+        organization_name as "organizationName",
+        account_id as "accountId",
+        hours_worked as "hoursWorked",
+        hourly_rate as "hourlyRate",
+        expected_amount as "expectedAmount",
+        submitted_date as "submittedDate",
+        expected_pay_date as "expectedPayDate",
+        status,
+        notes,
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      `,
+      [
+        userId,
+        payload.organizationName,
+        payload.accountId,
+        roundMoney(payload.hoursWorked),
+        roundMoney(payload.hourlyRate),
+        roundMoney(payload.expectedAmount),
+        payload.submittedDate,
+        payload.expectedPayDate,
+        payload.notes || null,
+      ],
+      userId
+    )
+    if (!result.rows[0]) throw new Error('Failed to create income claim')
+    return result.rows[0]
+  } catch (error) {
+    console.error('Error creating income claim:', error)
+    throw error
+  }
+}
+
+export async function updateIncomeClaim(
+  userId: string,
+  claimId: string,
+  updates: {
+    expectedPayDate?: string
+    expectedAmount?: number
+    status?: IncomeClaim['status']
+    notes?: string
+  }
+): Promise<IncomeClaim | null> {
+  try {
+    const allowedFields: Record<string, string> = {
+      expectedPayDate: 'expected_pay_date',
+      expectedAmount: 'expected_amount',
+      status: 'status',
+      notes: 'notes',
+    }
+
+    const filteredEntries = Object.entries(updates).filter(
+      ([key, value]) => key in allowedFields && value !== undefined
+    )
+
+    if (!filteredEntries.length) return null
+
+    const setClause = filteredEntries
+      .map(([key], index) => `${allowedFields[key]} = $${index + 2}`)
+      .concat('updated_at = NOW()')
+      .join(', ')
+
+    const normalizedValues = filteredEntries.map(([key, value]) => {
+      if (key === 'expectedAmount') return roundMoney(Number(value) || 0)
+      return value
+    })
+
+    const result = await query<IncomeClaim>(
+      `
+      UPDATE public.income_claims
+      SET ${setClause}
+      WHERE id = $1 AND user_id = $${normalizedValues.length + 2}
+      RETURNING
+        id,
+        organization_name as "organizationName",
+        account_id as "accountId",
+        hours_worked as "hoursWorked",
+        hourly_rate as "hourlyRate",
+        expected_amount as "expectedAmount",
+        submitted_date as "submittedDate",
+        expected_pay_date as "expectedPayDate",
+        status,
+        notes,
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      `,
+      [claimId, ...normalizedValues, userId],
+      userId
+    )
+
+    return result.rows[0] || null
+  } catch (error) {
+    console.error('Error updating income claim:', error)
     throw error
   }
 }

@@ -102,6 +102,21 @@ export interface AccountBalanceSnapshot {
   createdAt: string
 }
 
+export interface IncomeClaim {
+  id: string
+  organizationName: string
+  accountId: string
+  hoursWorked: number
+  hourlyRate: number
+  expectedAmount: number
+  submittedDate: string
+  expectedPayDate: string
+  status: "pending" | "paid" | "cancelled"
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: "1", name: "Salary", type: "income", isDefault: true },
   { id: "2", name: "Freelance", type: "income", isDefault: true },
