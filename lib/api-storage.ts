@@ -1,4 +1,4 @@
-import type { User, Account, Transaction, Budget, Goal, Category, Loan, LoanPayment } from './types'
+import type { User, Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot } from './types'
 
 export interface AdminInvite {
   code: string
@@ -74,6 +74,16 @@ function normalizeLoanPayment(raw: any): LoanPayment {
     principalComponent: toNumber(raw?.principalComponent),
     interestComponent: toNumber(raw?.interestComponent),
   } as LoanPayment
+}
+
+function normalizeAccountBalanceSnapshot(raw: any): AccountBalanceSnapshot {
+  return {
+    ...raw,
+    appCalculatedBalance: toNumber(raw?.appCalculatedBalance),
+    actualBalance: toNumber(raw?.actualBalance),
+    delta: toNumber(raw?.delta),
+    note: raw?.note || undefined,
+  } as AccountBalanceSnapshot
 }
 
 function getSessionToken(): string | null {
@@ -243,6 +253,43 @@ export async function addAccount(account: Omit<Account, 'id' | 'createdAt'>): Pr
 
   const data = await response.json()
   return normalizeAccount(data.account)
+}
+
+export async function getAccountBalanceSnapshots(): Promise<AccountBalanceSnapshot[]> {
+  try {
+    const response = await fetch('/api/financial/reconciliation', {
+      method: 'GET',
+      credentials: 'include',
+      headers: getAuthHeaders(),
+    })
+
+    if (!response.ok) return []
+    const data = await response.json()
+    return (data.snapshots || []).map(normalizeAccountBalanceSnapshot)
+  } catch {
+    return []
+  }
+}
+
+export async function addAccountBalanceSnapshot(payload: {
+  accountId: string
+  actualBalance: number
+  snapshotDate?: string
+  note?: string
+}): Promise<AccountBalanceSnapshot> {
+  const response = await fetch('/api/financial/reconciliation', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to create balance snapshot'))
+  }
+
+  const data = await response.json()
+  return normalizeAccountBalanceSnapshot(data.snapshot)
 }
 
 export async function updateAccount(id: string, updates: Partial<Account>): Promise<Account> {

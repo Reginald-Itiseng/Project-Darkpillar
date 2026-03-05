@@ -27,6 +27,7 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [showModal, setShowModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  const [reconcileAccount, setReconcileAccount] = useState<Account | null>(null)
   const [showMenu, setShowMenu] = useState<string | null>(null)
 
   const loadAccounts = async () => {
@@ -132,6 +133,7 @@ export default function AccountsPage() {
                     showMenu={showMenu === account.id}
                     onMenuToggle={() => setShowMenu(showMenu === account.id ? null : account.id)}
                     onEdit={() => handleEdit(account)}
+                    onReconcile={() => setReconcileAccount(account)}
                     onToggleActive={() => void handleToggleActive(account)}
                   />
                 ))
@@ -154,6 +156,7 @@ export default function AccountsPage() {
                     showMenu={showMenu === account.id}
                     onMenuToggle={() => setShowMenu(showMenu === account.id ? null : account.id)}
                     onEdit={() => handleEdit(account)}
+                    onReconcile={() => setReconcileAccount(account)}
                     onToggleActive={() => void handleToggleActive(account)}
                   />
                 ))}
@@ -178,6 +181,17 @@ export default function AccountsPage() {
           }}
         />
       )}
+
+      {reconcileAccount && (
+        <ReconciliationModal
+          account={reconcileAccount}
+          onClose={() => setReconcileAccount(null)}
+          onSave={async () => {
+            await loadAccounts()
+            setReconcileAccount(null)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -187,12 +201,14 @@ function AccountCard({
   showMenu,
   onMenuToggle,
   onEdit,
+  onReconcile,
   onToggleActive,
 }: {
   account: Account
   showMenu: boolean
   onMenuToggle: () => void
   onEdit: () => void
+  onReconcile: () => void
   onToggleActive: () => void
 }) {
   const isFixedDeposit = account.type === "fixed-deposit"
@@ -248,6 +264,13 @@ function AccountCard({
                 >
                   <Edit2 className="w-3 h-3" />
                   EDIT
+                </button>
+                <button
+                  onClick={onReconcile}
+                  className="flex items-center gap-2 w-full px-4 py-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
+                >
+                  <Check className="w-3 h-3" />
+                  LOG ACTUAL
                 </button>
                 <button
                   onClick={onToggleActive}
@@ -510,6 +533,135 @@ function AccountModal({
               className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors"
             >
               {account ? "UPDATE" : "CREATE"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function ReconciliationModal({
+  account,
+  onClose,
+  onSave,
+}: {
+  account: Account
+  onClose: () => void
+  onSave: () => Promise<void>
+}) {
+  const [snapshotDate, setSnapshotDate] = useState(new Date().toISOString().slice(0, 10))
+  const [actualBalance, setActualBalance] = useState(String(Number(account.balance) || 0))
+  const [note, setNote] = useState("")
+  const [error, setError] = useState("")
+
+  const appBalance = Number(account.balance) || 0
+  const actual = Number(actualBalance) || 0
+  const delta = actual - appBalance
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError("")
+
+    if (!Number.isFinite(actual)) {
+      setError("ACTUAL BALANCE MUST BE A VALID NUMBER")
+      return
+    }
+
+    try {
+      await apiStorage.addAccountBalanceSnapshot({
+        accountId: account.id,
+        snapshotDate,
+        actualBalance: actual,
+        note: note.trim() || undefined,
+      })
+      await onSave()
+    } catch (err) {
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO SAVE SNAPSHOT")
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 className="font-mono text-sm text-foreground">LOG ACTUAL BALANCE</h2>
+          <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto">
+          <div className="p-3 bg-secondary/40 border border-border rounded">
+            <div className="font-mono text-xs text-muted-foreground">ACCOUNT</div>
+            <div className="font-mono text-sm text-foreground">{account.name}</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="font-mono text-xs text-muted-foreground block mb-2">SNAPSHOT DATE</label>
+              <input
+                type="date"
+                value={snapshotDate}
+                onChange={(e) => setSnapshotDate(e.target.value)}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="font-mono text-xs text-muted-foreground block mb-2">ACTUAL BALANCE (P)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={actualBalance}
+                onChange={(e) => setActualBalance(e.target.value)}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-3 bg-secondary/30 border border-border rounded">
+              <div className="font-mono text-xs text-muted-foreground">APP CALCULATED</div>
+              <div className="font-mono text-sm text-foreground">{formatCurrency(appBalance)}</div>
+            </div>
+            <div className="p-3 bg-secondary/30 border border-border rounded">
+              <div className="font-mono text-xs text-muted-foreground">DELTA (ACTUAL - APP)</div>
+              <div className={`font-mono text-sm ${delta >= 0 ? "text-warning" : "text-primary"}`}>
+                {formatCurrency(delta)}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="font-mono text-xs text-muted-foreground block mb-2">NOTE (OPTIONAL)</label>
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="E.G. BANK CHARGE NOT LOGGED"
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary uppercase"
+            />
+          </div>
+
+          {error && (
+            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-border text-muted-foreground font-mono text-sm rounded hover:bg-secondary"
+            >
+              CANCEL
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90"
+            >
+              SAVE SNAPSHOT
             </button>
           </div>
         </form>

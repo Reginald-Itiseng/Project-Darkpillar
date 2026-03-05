@@ -1,5 +1,5 @@
 import { query, transaction } from './db'
-import type { Account, Transaction, Budget, Goal, Category, Loan, LoanPayment } from './types'
+import type { Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot } from './types'
 
 interface LoanPaymentInput {
   loanId: string
@@ -1051,6 +1051,99 @@ export async function addCategory(
     return result.rows[0]
   } catch (error) {
     console.error('Error adding category:', error)
+    throw error
+  }
+}
+
+export async function getAccountBalanceSnapshots(userId: string): Promise<AccountBalanceSnapshot[]> {
+  try {
+    const result = await query<AccountBalanceSnapshot>(
+      `
+      SELECT
+        id,
+        account_id as "accountId",
+        snapshot_date as "snapshotDate",
+        app_calculated_balance as "appCalculatedBalance",
+        actual_balance as "actualBalance",
+        delta,
+        note,
+        created_at as "createdAt"
+      FROM public.account_balance_snapshots
+      WHERE user_id = $1
+      ORDER BY snapshot_date DESC, created_at DESC
+      `,
+      [userId],
+      userId
+    )
+    return result.rows
+  } catch (error) {
+    console.error('Error fetching account balance snapshots:', error)
+    throw error
+  }
+}
+
+export async function addAccountBalanceSnapshot(
+  userId: string,
+  payload: {
+    accountId: string
+    snapshotDate: string
+    appCalculatedBalance: number
+    actualBalance: number
+    note?: string
+  }
+): Promise<AccountBalanceSnapshot> {
+  try {
+    const delta = roundMoney(payload.actualBalance - payload.appCalculatedBalance)
+    const result = await query<AccountBalanceSnapshot>(
+      `
+      INSERT INTO public.account_balance_snapshots (
+        id,
+        user_id,
+        account_id,
+        snapshot_date,
+        app_calculated_balance,
+        actual_balance,
+        delta,
+        note,
+        created_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        NOW()
+      )
+      RETURNING
+        id,
+        account_id as "accountId",
+        snapshot_date as "snapshotDate",
+        app_calculated_balance as "appCalculatedBalance",
+        actual_balance as "actualBalance",
+        delta,
+        note,
+        created_at as "createdAt"
+      `,
+      [
+        userId,
+        payload.accountId,
+        payload.snapshotDate,
+        roundMoney(payload.appCalculatedBalance),
+        roundMoney(payload.actualBalance),
+        delta,
+        payload.note || null,
+      ],
+      userId
+    )
+
+    if (!result.rows[0]) throw new Error('Failed to create account balance snapshot')
+    return result.rows[0]
+  } catch (error) {
+    console.error('Error creating account balance snapshot:', error)
     throw error
   }
 }

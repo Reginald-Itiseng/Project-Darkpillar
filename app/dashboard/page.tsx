@@ -6,9 +6,10 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
-import type { Budget, Goal, Transaction } from "@/lib/types"
+import type { Account, AccountBalanceSnapshot, Budget, Goal, Transaction } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth, getMonthName } from "@/lib/utils"
 import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock } from "lucide-react"
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 const LOAN_MODEL_PREFIX = "__SINGLE_PAYMENT_MODEL__:"
 
@@ -46,11 +47,14 @@ export default function DashboardPage() {
     amount: number
     dueDate: string
   }>>([])
+  const [accountsIndex, setAccountsIndex] = useState<Account[]>([])
+  const [reconciliationSnapshots, setReconciliationSnapshots] = useState<AccountBalanceSnapshot[]>([])
+  const [selectedReconciliationAccountId, setSelectedReconciliationAccountId] = useState("")
   const [user, setUserState] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     const loadDashboardData = async () => {
-      const [userData, accounts, transactions, budgets, goals, loanData, obligations] = await Promise.all([
+      const [userData, accounts, transactions, budgets, goals, loanData, obligations, snapshots] = await Promise.all([
         apiStorage.verifySession(),
         apiStorage.getAccounts(),
         apiStorage.getTransactions(),
@@ -58,6 +62,7 @@ export default function DashboardPage() {
         apiStorage.getGoals(),
         apiStorage.getLoans(),
         apiStorage.getUpcomingObligations(30),
+        apiStorage.getAccountBalanceSnapshots(),
       ])
 
       if (userData) {
@@ -145,10 +150,33 @@ export default function DashboardPage() {
 
       setBudgetAlerts(alerts)
       setUpcomingObligations(obligations.slice(0, 8))
+      setAccountsIndex(accounts)
+      setReconciliationSnapshots(snapshots)
+      if (!selectedReconciliationAccountId && accounts[0]?.id) {
+        setSelectedReconciliationAccountId(accounts[0].id)
+      }
     }
 
     void loadDashboardData()
-  }, [])
+  }, [selectedReconciliationAccountId])
+
+  const snapshotsForSelectedAccount = reconciliationSnapshots
+    .filter((snapshot) => snapshot.accountId === selectedReconciliationAccountId)
+    .sort((a, b) => a.snapshotDate.localeCompare(b.snapshotDate))
+
+  const reconciliationChartData = snapshotsForSelectedAccount.map((snapshot) => ({
+    date: snapshot.snapshotDate,
+    app: Number(snapshot.appCalculatedBalance) || 0,
+    actual: Number(snapshot.actualBalance) || 0,
+    delta: Number(snapshot.delta) || 0,
+  }))
+
+  const latestReconciliation = snapshotsForSelectedAccount[snapshotsForSelectedAccount.length - 1]
+  const averageAbsoluteDelta =
+    snapshotsForSelectedAccount.length > 0
+      ? snapshotsForSelectedAccount.reduce((sum, item) => sum + Math.abs(Number(item.delta) || 0), 0) /
+        snapshotsForSelectedAccount.length
+      : 0
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -339,6 +367,73 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between gap-4">
+              <div>
+                <h2 className="font-mono text-sm text-foreground">RECONCILIATION TRACKING</h2>
+                <p className="font-mono text-xs text-muted-foreground mt-1">
+                  APP-CALCULATED VS ACTUAL ACCOUNT BALANCE OVER TIME
+                </p>
+              </div>
+              <select
+                value={selectedReconciliationAccountId}
+                onChange={(e) => setSelectedReconciliationAccountId(e.target.value)}
+                className="bg-secondary border border-border rounded px-3 py-2 font-mono text-xs text-foreground"
+              >
+                {accountsIndex.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {reconciliationChartData.length === 0 ? (
+              <div className="p-8 text-center font-mono text-sm text-muted-foreground">
+                NO RECONCILIATION SNAPSHOTS YET. LOG ACTUAL ACCOUNT BALANCES FROM ACCOUNT REGISTRY.
+              </div>
+            ) : (
+              <div className="p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="p-3 bg-secondary/40 border border-border rounded">
+                    <div className="font-mono text-xs text-muted-foreground">LATEST DRIFT</div>
+                    <div className={`font-mono text-sm ${(latestReconciliation?.delta || 0) >= 0 ? "text-warning" : "text-primary"}`}>
+                      {formatCurrency(Number(latestReconciliation?.delta || 0))}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-secondary/40 border border-border rounded">
+                    <div className="font-mono text-xs text-muted-foreground">AVG ABS DRIFT</div>
+                    <div className="font-mono text-sm text-foreground">{formatCurrency(averageAbsoluteDelta)}</div>
+                  </div>
+                  <div className="p-3 bg-secondary/40 border border-border rounded">
+                    <div className="font-mono text-xs text-muted-foreground">SNAPSHOTS</div>
+                    <div className="font-mono text-sm text-foreground">{reconciliationChartData.length}</div>
+                  </div>
+                </div>
+
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={reconciliationChartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 11 }}
+                        tickFormatter={(value) => formatDate(value)}
+                      />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip
+                        formatter={(value: number, key: string) => [formatCurrency(Number(value) || 0), key.toUpperCase()]}
+                        labelFormatter={(value) => `DATE: ${formatDate(String(value))}`}
+                      />
+                      <Line type="monotone" dataKey="app" name="App" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="actual" name="Actual" stroke="#22c55e" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 p-4 bg-card border border-border rounded-lg">

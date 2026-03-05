@@ -91,6 +91,17 @@ export interface LoanPayment {
   createdAt: string
 }
 
+export interface AccountBalanceSnapshot {
+  id: string
+  accountId: string
+  snapshotDate: string
+  appCalculatedBalance: number
+  actualBalance: number
+  delta: number
+  note?: string
+  createdAt: string
+}
+
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: "1", name: "Salary", type: "income", isDefault: true },
   { id: "2", name: "Freelance", type: "income", isDefault: true },
