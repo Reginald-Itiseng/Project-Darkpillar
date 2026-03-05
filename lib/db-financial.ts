@@ -1324,6 +1324,127 @@ export async function updateIncomeClaim(
   }
 }
 
+export async function settleIncomeClaim(
+  userId: string,
+  claimId: string,
+  paymentDate: string
+): Promise<{ claim: IncomeClaim; transaction: Transaction }> {
+  return transaction(async (client) => {
+    const claimResult = await client.query<IncomeClaim>(
+      `
+      SELECT
+        id,
+        organization_name as "organizationName",
+        account_id as "accountId",
+        hours_worked as "hoursWorked",
+        hourly_rate as "hourlyRate",
+        expected_amount as "expectedAmount",
+        submitted_date as "submittedDate",
+        expected_pay_date as "expectedPayDate",
+        status,
+        notes,
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      FROM public.income_claims
+      WHERE id = $1 AND user_id = $2
+      FOR UPDATE
+      `,
+      [claimId, userId]
+    )
+
+    const claim = claimResult.rows[0]
+    if (!claim) throw new Error('Income claim not found')
+    if (claim.status !== 'pending') throw new Error('Only pending claims can be marked as paid')
+
+    const amount = roundMoney(Number(claim.expectedAmount) || 0)
+    if (amount <= 0) throw new Error('Claim amount must be greater than zero')
+
+    const accountCredit = await client.query(
+      'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+      [amount, claim.accountId, userId]
+    )
+    if (!accountCredit.rowCount) throw new Error('Claim account not found')
+
+    const transactionResult = await client.query<Transaction>(
+      `
+      INSERT INTO public.transactions (
+        id,
+        user_id,
+        type,
+        amount,
+        category,
+        description,
+        account_id,
+        to_account_id,
+        date,
+        created_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        $1,
+        'income',
+        $2,
+        'Salary',
+        $3,
+        $4,
+        NULL,
+        $5,
+        NOW()
+      )
+      RETURNING
+        id,
+        type,
+        amount,
+        category,
+        description,
+        account_id as "accountId",
+        to_account_id as "toAccountId",
+        date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate",
+        parent_transaction_id as "parentTransactionId",
+        is_system_generated as "isSystemGenerated",
+        created_at as "createdAt"
+      `,
+      [
+        userId,
+        amount,
+        `CLAIM PAYOUT - ${claim.organizationName.toUpperCase()}`,
+        claim.accountId,
+        paymentDate,
+      ]
+    )
+
+    const updatedClaimResult = await client.query<IncomeClaim>(
+      `
+      UPDATE public.income_claims
+      SET status = 'paid', updated_at = NOW()
+      WHERE id = $1 AND user_id = $2
+      RETURNING
+        id,
+        organization_name as "organizationName",
+        account_id as "accountId",
+        hours_worked as "hoursWorked",
+        hourly_rate as "hourlyRate",
+        expected_amount as "expectedAmount",
+        submitted_date as "submittedDate",
+        expected_pay_date as "expectedPayDate",
+        status,
+        notes,
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      `,
+      [claimId, userId]
+    )
+
+    const updatedClaim = updatedClaimResult.rows[0]
+    const createdTransaction = transactionResult.rows[0]
+    if (!updatedClaim || !createdTransaction) throw new Error('Failed to settle income claim')
+
+    return { claim: updatedClaim, transaction: createdTransaction }
+  }, userId)
+}
+
 // ============================================================================
 // LOANS
 // ============================================================================

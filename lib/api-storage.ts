@@ -440,6 +440,28 @@ export async function updateIncomeClaim(
   return normalizeIncomeClaim(data.claim)
 }
 
+export async function settleIncomeClaim(payload: {
+  claimId: string
+  paymentDate?: string
+}): Promise<{ claim: IncomeClaim; transaction: Transaction }> {
+  const response = await fetch('/api/financial/income-claims/settle', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to mark income claim as paid'))
+  }
+
+  const data = await response.json()
+  return {
+    claim: normalizeIncomeClaim(data.claim),
+    transaction: normalizeTransaction(data.transaction),
+  }
+}
+
 export async function deleteTransaction(id: string): Promise<void> {
   const response = await fetch(`/api/financial/transactions?id=${id}`, {
     method: 'DELETE',

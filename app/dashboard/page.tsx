@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [selectedIncomeClaimId, setSelectedIncomeClaimId] = useState("")
   const [selectedLoanId, setSelectedLoanId] = useState("")
   const [plannedExtraLoanPayment, setPlannedExtraLoanPayment] = useState("")
+  const [refreshNonce, setRefreshNonce] = useState(0)
   const [reconciliationSnapshots, setReconciliationSnapshots] = useState<AccountBalanceSnapshot[]>([])
   const [selectedReconciliationAccountId, setSelectedReconciliationAccountId] = useState("")
   const [user, setUserState] = useState<{ username: string } | null>(null)
@@ -179,7 +180,7 @@ export default function DashboardPage() {
     }
 
     void loadDashboardData()
-  }, [selectedReconciliationAccountId])
+  }, [selectedReconciliationAccountId, refreshNonce])
 
   const pendingIncomeClaims = incomeClaims.filter((claim) => claim.status === "pending")
   const pendingIncomeTotal = pendingIncomeClaims.reduce((sum, claim) => sum + (Number(claim.expectedAmount) || 0), 0)
@@ -208,16 +209,32 @@ export default function DashboardPage() {
     try {
       await apiStorage.addIncomeClaim(payload)
       setShowIncomeClaimModal(false)
-      const refreshedClaims = await apiStorage.getIncomeClaims()
-      const nextClaims = refreshedClaims.sort((a, b) => a.expectedPayDate.localeCompare(b.expectedPayDate))
-      setIncomeClaims(nextClaims)
-      const firstPending = nextClaims.find((claim) => claim.status === "pending")
-      if (firstPending) setSelectedIncomeClaimId(firstPending.id)
+      setRefreshNonce((value) => value + 1)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to add income claim"
       alert(message)
     } finally {
       setIsSavingIncomeClaim(false)
+    }
+  }
+
+  const handleMarkClaimPaid = async (claimId: string) => {
+    const today = new Date().toISOString().slice(0, 10)
+    const paymentDateInput = prompt("Enter credited date (YYYY-MM-DD):", today)
+    if (paymentDateInput === null) return
+
+    const paymentDate = paymentDateInput.trim()
+    if (!paymentDate) return
+
+    const confirmed = confirm("MARK THIS CLAIM AS PAID? This will post an income transaction and increase account balance.")
+    if (!confirmed) return
+
+    try {
+      await apiStorage.settleIncomeClaim({ claimId, paymentDate })
+      setRefreshNonce((value) => value + 1)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to mark claim as paid"
+      alert(message)
     }
   }
 
@@ -397,7 +414,15 @@ export default function DashboardPage() {
                         SUBMITTED {formatDate(claim.submittedDate)} | EXPECTED {formatDate(claim.expectedPayDate)} | {claim.hoursWorked}H @ {formatCurrency(claim.hourlyRate)}
                       </div>
                     </div>
-                    <div className="font-mono text-sm text-success">{formatCurrency(claim.expectedAmount)}</div>
+                    <div className="flex items-center gap-3">
+                      <div className="font-mono text-sm text-success">{formatCurrency(claim.expectedAmount)}</div>
+                      <button
+                        onClick={() => void handleMarkClaimPaid(claim.id)}
+                        className="px-3 py-1 rounded border border-success/40 text-success font-mono text-xs hover:bg-success/10 transition-colors"
+                      >
+                        MARK AS PAID
+                      </button>
+                    </div>
                   </div>
                 ))
               )}

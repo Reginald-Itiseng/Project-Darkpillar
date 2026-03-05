@@ -157,6 +157,12 @@ export async function PUT(request: NextRequest) {
       if (!['pending', 'paid', 'cancelled'].includes(status)) {
         return NextResponse.json({ error: 'Invalid claim status' }, { status: 400 })
       }
+      if (status === 'paid') {
+        return NextResponse.json(
+          { error: 'Use the mark-as-paid action to settle this claim and post income.' },
+          { status: 400 }
+        )
+      }
       updates.status = status as IncomeClaim['status']
     }
 
@@ -179,4 +185,3 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: message }, { status })
   }
 }
-
