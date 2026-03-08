@@ -6,10 +6,9 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
-import type { Account, AccountBalanceSnapshot, Budget, Goal, IncomeClaim, Loan, Transaction } from "@/lib/types"
+import type { Account, Budget, Goal, IncomeClaim, Loan, Transaction } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth, getMonthName } from "@/lib/utils"
 import { Wallet, TrendingUp, TrendingDown, Target, AlertTriangle, CheckCircle, Clock, Plus, X } from "lucide-react"
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 const LOAN_MODEL_PREFIX = "__SINGLE_PAYMENT_MODEL__:"
 
@@ -26,6 +25,15 @@ function getModeledTotalDue(notes?: string): number | null {
   } catch {
     return null
   }
+}
+
+function dateOnlyToUtc(dateOnly: string): number {
+  return new Date(`${dateOnly}T00:00:00Z`).getTime()
+}
+
+function diffDays(fromDateOnly: string, toDateOnly: string): number {
+  const msPerDay = 1000 * 60 * 60 * 24
+  return Math.floor((dateOnlyToUtc(toDateOnly) - dateOnlyToUtc(fromDateOnly)) / msPerDay)
 }
 
 export default function DashboardPage() {
@@ -51,18 +59,17 @@ export default function DashboardPage() {
   const [activeLoans, setActiveLoans] = useState<Loan[]>([])
   const [incomeClaims, setIncomeClaims] = useState<IncomeClaim[]>([])
   const [showIncomeClaimModal, setShowIncomeClaimModal] = useState(false)
+  const [claimTab, setClaimTab] = useState<IncomeClaim["status"]>("pending")
   const [isSavingIncomeClaim, setIsSavingIncomeClaim] = useState(false)
   const [selectedIncomeClaimId, setSelectedIncomeClaimId] = useState("")
   const [selectedLoanId, setSelectedLoanId] = useState("")
   const [plannedExtraLoanPayment, setPlannedExtraLoanPayment] = useState("")
   const [refreshNonce, setRefreshNonce] = useState(0)
-  const [reconciliationSnapshots, setReconciliationSnapshots] = useState<AccountBalanceSnapshot[]>([])
-  const [selectedReconciliationAccountId, setSelectedReconciliationAccountId] = useState("")
   const [user, setUserState] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     const loadDashboardData = async () => {
-      const [userData, accounts, transactions, budgets, goals, loanData, obligations, snapshots, claims] = await Promise.all([
+      const [userData, accounts, transactions, budgets, goals, loanData, obligations, claims] = await Promise.all([
         apiStorage.verifySession(),
         apiStorage.getAccounts(),
         apiStorage.getTransactions(),
@@ -70,7 +77,6 @@ export default function DashboardPage() {
         apiStorage.getGoals(),
         apiStorage.getLoans(),
         apiStorage.getUpcomingObligations(90),
-        apiStorage.getAccountBalanceSnapshots(),
         apiStorage.getIncomeClaims(),
       ])
 
@@ -173,17 +179,24 @@ export default function DashboardPage() {
       if (!selectedLoanId && nextActiveLoans[0]?.id) {
         setSelectedLoanId(nextActiveLoans[0].id)
       }
-      setReconciliationSnapshots(snapshots)
-      if (!selectedReconciliationAccountId && accounts[0]?.id) {
-        setSelectedReconciliationAccountId(accounts[0].id)
-      }
     }
 
     void loadDashboardData()
-  }, [selectedReconciliationAccountId, refreshNonce])
+  }, [refreshNonce])
 
   const pendingIncomeClaims = incomeClaims.filter((claim) => claim.status === "pending")
+  const paidIncomeClaims = incomeClaims.filter((claim) => claim.status === "paid")
+  const cancelledIncomeClaims = incomeClaims.filter((claim) => claim.status === "cancelled")
+  const claimsForTab =
+    claimTab === "pending" ? pendingIncomeClaims : claimTab === "paid" ? paidIncomeClaims : cancelledIncomeClaims
   const pendingIncomeTotal = pendingIncomeClaims.reduce((sum, claim) => sum + (Number(claim.expectedAmount) || 0), 0)
+  const todayDateOnly = new Date().toISOString().slice(0, 10)
+  const overduePendingClaims = pendingIncomeClaims.filter((claim) => claim.expectedPayDate < todayDateOnly)
+  const nextPendingClaim =
+    pendingIncomeClaims
+      .filter((claim) => claim.expectedPayDate >= todayDateOnly)
+      .sort((a, b) => a.expectedPayDate.localeCompare(b.expectedPayDate))[0] || null
+  const nextPaydayInDays = nextPendingClaim ? diffDays(todayDateOnly, nextPendingClaim.expectedPayDate) : null
   const selectedIncomeClaim = pendingIncomeClaims.find((claim) => claim.id === selectedIncomeClaimId) || null
   const selectedLoan = activeLoans.find((loan) => loan.id === selectedLoanId) || null
   const extraLoanPaymentAmount = Math.max(0, Number(plannedExtraLoanPayment) || 0)
@@ -238,24 +251,6 @@ export default function DashboardPage() {
     }
   }
 
-  const snapshotsForSelectedAccount = reconciliationSnapshots
-    .filter((snapshot) => snapshot.accountId === selectedReconciliationAccountId)
-    .sort((a, b) => a.snapshotDate.localeCompare(b.snapshotDate))
-
-  const reconciliationChartData = snapshotsForSelectedAccount.map((snapshot) => ({
-    date: snapshot.snapshotDate,
-    app: Number(snapshot.appCalculatedBalance) || 0,
-    actual: Number(snapshot.actualBalance) || 0,
-    delta: Number(snapshot.delta) || 0,
-  }))
-
-  const latestReconciliation = snapshotsForSelectedAccount[snapshotsForSelectedAccount.length - 1]
-  const averageAbsoluteDelta =
-    snapshotsForSelectedAccount.length > 0
-      ? snapshotsForSelectedAccount.reduce((sum, item) => sum + Math.abs(Number(item.delta) || 0), 0) /
-        snapshotsForSelectedAccount.length
-      : 0
-
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -305,7 +300,7 @@ export default function DashboardPage() {
           <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between gap-4">
               <div>
-                <h2 className="font-mono text-sm text-foreground">PENDING INCOME CLAIMS</h2>
+                <h2 className="font-mono text-sm text-foreground">INCOME CLAIMS CONTROL</h2>
                 <p className="font-mono text-xs text-muted-foreground mt-1">
                   SUBMITTED HOURS TRACKED BEFORE CASH IS CREDITED
                 </p>
@@ -319,7 +314,7 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 border-b border-border">
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 border-b border-border">
               <div className="p-3 bg-secondary/40 border border-border rounded">
                 <div className="font-mono text-xs text-muted-foreground">PENDING CLAIMS</div>
                 <div className="font-mono text-sm text-foreground">{pendingIncomeClaims.length}</div>
@@ -329,9 +324,17 @@ export default function DashboardPage() {
                 <div className="font-mono text-sm text-success">{formatCurrency(pendingIncomeTotal)}</div>
               </div>
               <div className="p-3 bg-secondary/40 border border-border rounded">
-                <div className="font-mono text-xs text-muted-foreground">NEXT PAY DATE</div>
+                <div className="font-mono text-xs text-muted-foreground">OVERDUE CLAIMS</div>
                 <div className="font-mono text-sm text-foreground">
-                  {pendingIncomeClaims[0] ? formatDate(pendingIncomeClaims[0].expectedPayDate) : "N/A"}
+                  {overduePendingClaims.length}
+                </div>
+              </div>
+              <div className="p-3 bg-secondary/40 border border-border rounded">
+                <div className="font-mono text-xs text-muted-foreground">NEXT PAYDAY ETA</div>
+                <div className="font-mono text-sm text-foreground">
+                  {nextPendingClaim && nextPaydayInDays !== null
+                    ? `${nextPaydayInDays} DAY${nextPaydayInDays === 1 ? "" : "S"}`
+                    : "N/A"}
                 </div>
               </div>
             </div>
@@ -400,31 +403,102 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            <div className="p-4 border-b border-border flex items-center gap-2">
+              <button
+                onClick={() => setClaimTab("pending")}
+                className={`px-3 py-1 rounded border font-mono text-xs transition-colors ${
+                  claimTab === "pending"
+                    ? "border-warning/40 text-warning bg-warning/10"
+                    : "border-border text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                PENDING ({pendingIncomeClaims.length})
+              </button>
+              <button
+                onClick={() => setClaimTab("paid")}
+                className={`px-3 py-1 rounded border font-mono text-xs transition-colors ${
+                  claimTab === "paid"
+                    ? "border-success/40 text-success bg-success/10"
+                    : "border-border text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                PAID ({paidIncomeClaims.length})
+              </button>
+              <button
+                onClick={() => setClaimTab("cancelled")}
+                className={`px-3 py-1 rounded border font-mono text-xs transition-colors ${
+                  claimTab === "cancelled"
+                    ? "border-destructive/40 text-destructive bg-destructive/10"
+                    : "border-border text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                CANCELLED ({cancelledIncomeClaims.length})
+              </button>
+            </div>
+
             <div className="divide-y divide-border">
-              {pendingIncomeClaims.length === 0 ? (
+              {claimsForTab.length === 0 ? (
                 <div className="p-8 text-center font-mono text-sm text-muted-foreground">
-                  NO PENDING CLAIMS. LOG A CLAIM WHEN YOU SUBMIT YOUR TIMESHEET.
+                  {claimTab === "pending"
+                    ? "NO PENDING CLAIMS. LOG A CLAIM WHEN YOU SUBMIT YOUR TIMESHEET."
+                    : claimTab === "paid"
+                      ? "NO PAID CLAIMS YET."
+                      : "NO CANCELLED CLAIMS."}
                 </div>
               ) : (
-                pendingIncomeClaims.slice(0, 6).map((claim) => (
+                claimsForTab.slice(0, 8).map((claim) => {
+                  const daysToPay = diffDays(todayDateOnly, claim.expectedPayDate)
+                  const timingLabel =
+                    claim.status !== "pending"
+                      ? `EXPECTED ${formatDate(claim.expectedPayDate)}`
+                      : daysToPay < 0
+                        ? `OVERDUE BY ${Math.abs(daysToPay)} DAY${Math.abs(daysToPay) === 1 ? "" : "S"}`
+                        : daysToPay === 0
+                          ? "DUE TODAY"
+                          : `DUE IN ${daysToPay} DAY${daysToPay === 1 ? "" : "S"}`
+
+                  return (
                   <div key={claim.id} className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors">
                     <div>
-                      <div className="font-mono text-sm text-foreground">{claim.organizationName}</div>
+                      <div className="font-mono text-sm text-foreground flex items-center gap-2">
+                        <span>{claim.organizationName}</span>
+                        <span
+                          className={`px-2 py-[2px] rounded text-[10px] border ${
+                            claim.status === "paid"
+                              ? "border-success/40 text-success bg-success/10"
+                              : claim.status === "cancelled"
+                                ? "border-destructive/40 text-destructive bg-destructive/10"
+                                : "border-warning/40 text-warning bg-warning/10"
+                          }`}
+                        >
+                          {claim.status.toUpperCase()}
+                        </span>
+                      </div>
                       <div className="font-mono text-xs text-muted-foreground">
                         SUBMITTED {formatDate(claim.submittedDate)} | EXPECTED {formatDate(claim.expectedPayDate)} | {claim.hoursWorked}H @ {formatCurrency(claim.hourlyRate)}
+                      </div>
+                      <div
+                        className={`font-mono text-[10px] mt-1 ${
+                          claim.status === "pending" && daysToPay < 0 ? "text-destructive" : "text-muted-foreground"
+                        }`}
+                      >
+                        {timingLabel}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="font-mono text-sm text-success">{formatCurrency(claim.expectedAmount)}</div>
-                      <button
-                        onClick={() => void handleMarkClaimPaid(claim.id)}
-                        className="px-3 py-1 rounded border border-success/40 text-success font-mono text-xs hover:bg-success/10 transition-colors"
-                      >
-                        MARK AS PAID
-                      </button>
+                      {claim.status === "pending" && (
+                        <button
+                          onClick={() => void handleMarkClaimPaid(claim.id)}
+                          className="px-3 py-1 rounded border border-success/40 text-success font-mono text-xs hover:bg-success/10 transition-colors"
+                        >
+                          MARK AS PAID
+                        </button>
+                      )}
                     </div>
                   </div>
-                ))
+                  )
+                })
               )}
             </div>
           </div>
@@ -572,73 +646,6 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center justify-between gap-4">
-              <div>
-                <h2 className="font-mono text-sm text-foreground">RECONCILIATION TRACKING</h2>
-                <p className="font-mono text-xs text-muted-foreground mt-1">
-                  APP-CALCULATED VS ACTUAL ACCOUNT BALANCE OVER TIME
-                </p>
-              </div>
-              <select
-                value={selectedReconciliationAccountId}
-                onChange={(e) => setSelectedReconciliationAccountId(e.target.value)}
-                className="bg-secondary border border-border rounded px-3 py-2 font-mono text-xs text-foreground"
-              >
-                {accountsIndex.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {reconciliationChartData.length === 0 ? (
-              <div className="p-8 text-center font-mono text-sm text-muted-foreground">
-                NO RECONCILIATION SNAPSHOTS YET. LOG ACTUAL ACCOUNT BALANCES FROM ACCOUNT REGISTRY.
-              </div>
-            ) : (
-              <div className="p-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="p-3 bg-secondary/40 border border-border rounded">
-                    <div className="font-mono text-xs text-muted-foreground">LATEST DRIFT</div>
-                    <div className={`font-mono text-sm ${(latestReconciliation?.delta || 0) >= 0 ? "text-warning" : "text-primary"}`}>
-                      {formatCurrency(Number(latestReconciliation?.delta || 0))}
-                    </div>
-                  </div>
-                  <div className="p-3 bg-secondary/40 border border-border rounded">
-                    <div className="font-mono text-xs text-muted-foreground">AVG ABS DRIFT</div>
-                    <div className="font-mono text-sm text-foreground">{formatCurrency(averageAbsoluteDelta)}</div>
-                  </div>
-                  <div className="p-3 bg-secondary/40 border border-border rounded">
-                    <div className="font-mono text-xs text-muted-foreground">SNAPSHOTS</div>
-                    <div className="font-mono text-sm text-foreground">{reconciliationChartData.length}</div>
-                  </div>
-                </div>
-
-                <div className="h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={reconciliationChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 11 }}
-                        tickFormatter={(value) => formatDate(value)}
-                      />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip
-                        formatter={(value: number, key: string) => [formatCurrency(Number(value) || 0), key.toUpperCase()]}
-                        labelFormatter={(value) => `DATE: ${formatDate(String(value))}`}
-                      />
-                      <Line type="monotone" dataKey="app" name="App" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="actual" name="Actual" stroke="#22c55e" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="mt-6 p-4 bg-card border border-border rounded-lg">
