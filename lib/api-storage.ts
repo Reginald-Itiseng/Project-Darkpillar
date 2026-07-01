@@ -133,13 +133,13 @@ export async function register(
   email: string,
   name: string,
   pin: string,
-  inviteCode: string
+  registrationSecret: string
 ): Promise<{ user: User; token: string }> {
   const response = await fetch('/api/auth/register', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, pin, inviteCode }),
+    body: JSON.stringify({ email, name, pin, registrationSecret }),
   })
 
   if (!response.ok) {

@@ -5,7 +5,6 @@ import {
   createSession,
   cleanupAuthUser,
   getUserByEmail,
-  consumeRegistrationInvite,
 } from '@/lib/db-auth'
 import crypto from 'crypto'
 
@@ -21,8 +20,15 @@ function generateSessionToken(): string {
   return crypto.randomBytes(32).toString('hex')
 }
 
-function hashInviteCode(inviteCode: string): string {
-  return crypto.createHash('sha256').update(inviteCode).digest('hex')
+function isValidRegistrationSecret(provided: string): boolean {
+  const expected = process.env.REGISTRATION_SECRET
+  if (!expected) return false
+
+  const providedBuffer = Buffer.from(provided)
+  const expectedBuffer = Buffer.from(expected)
+  if (providedBuffer.length !== expectedBuffer.length) return false
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer)
 }
 
 export async function POST(request: NextRequest) {
@@ -30,13 +36,20 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { email, name, pin, inviteCode } = body
+    const { email, name, pin, registrationSecret } = body
 
     // Validation
-    if (!email || !name || !pin || !inviteCode) {
+    if (!email || !name || !pin) {
       return NextResponse.json(
-        { error: 'Missing required fields: email, name, pin, inviteCode' },
+        { error: 'Missing required fields: email, name, pin' },
         { status: 400 }
+      )
+    }
+
+    if (!isValidRegistrationSecret(String(registrationSecret || ''))) {
+      return NextResponse.json(
+        { error: 'Invalid registration passphrase' },
+        { status: 403 }
       )
     }
 
@@ -57,7 +70,6 @@ export async function POST(request: NextRequest) {
     // Normalize login key to match client behavior.
     const normalizedEmail = String(email).trim().toLowerCase()
     const normalizedName = String(name).trim().toUpperCase()
-    const normalizedInviteCode = String(inviteCode).trim().toUpperCase()
 
     const existingUser = await getUserByEmail(normalizedEmail)
     if (existingUser) {
@@ -74,16 +86,6 @@ export async function POST(request: NextRequest) {
 
     const user = await createUser(userId, normalizedEmail, normalizedName, 0)
     await storePasswordHash(userId, hashedPin)
-
-    // Enforce invite-only registration.
-    const inviteConsumed = await consumeRegistrationInvite(hashInviteCode(normalizedInviteCode), userId)
-    if (!inviteConsumed) {
-      await cleanupAuthUser(userId)
-      return NextResponse.json(
-        { error: 'Invalid or expired invite code' },
-        { status: 403 }
-      )
-    }
 
     // Create session immediately after registration
     const token = generateSessionToken()
@@ -122,13 +124,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.error('Registration error:', error)
-
-    if (error instanceof Error && error.message.toLowerCase().includes('registration_invites')) {
-      return NextResponse.json(
-        { error: 'Invite system not configured. Contact administrator.' },
-        { status: 500 }
-      )
-    }
 
     // Handle duplicate email
     if (error instanceof Error && error.message.includes('duplicate')) {
