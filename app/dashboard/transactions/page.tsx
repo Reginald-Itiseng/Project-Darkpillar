@@ -8,16 +8,20 @@ import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
 import type { Transaction, Account, Category } from "@/lib/types"
 import { formatCurrency, formatDate, getCurrentMonth } from "@/lib/utils"
-import { Plus, TrendingUp, TrendingDown, ArrowLeftRight, Filter, X, Search, AlertCircle, Trash2 } from "lucide-react"
+import { Plus, TrendingUp, TrendingDown, ArrowLeftRight, Filter, X, Search, AlertCircle, Trash2, Edit2 } from "lucide-react"
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [showModal, setShowModal] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [filterType, setFilterType] = useState<"all" | "income" | "expense" | "transfer">("all")
   const [filterAccount, setFilterAccount] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
+  const [filterDateFrom, setFilterDateFrom] = useState("")
+  const [filterDateTo, setFilterDateTo] = useState("")
+  const [visibleCount, setVisibleCount] = useState(25)
 
   const loadData = async () => {
     const [nextTransactions, nextAccounts, nextCategories] = await Promise.all([
@@ -34,10 +38,28 @@ export default function TransactionsPage() {
     void loadData()
   }, [])
 
+  useEffect(() => {
+    setVisibleCount(25)
+  }, [filterType, filterAccount, searchQuery, filterDateFrom, filterDateTo])
+
+  const hasActiveFilters = Boolean(
+    filterType !== "all" || filterAccount !== "all" || searchQuery || filterDateFrom || filterDateTo
+  )
+
+  const clearFilters = () => {
+    setFilterType("all")
+    setFilterAccount("all")
+    setSearchQuery("")
+    setFilterDateFrom("")
+    setFilterDateTo("")
+  }
+
   const filteredTransactions = transactions
     .filter((t) => {
       if (filterType !== "all" && t.type !== filterType) return false
       if (filterAccount !== "all" && t.accountId !== filterAccount) return false
+      if (filterDateFrom && t.date < filterDateFrom) return false
+      if (filterDateTo && t.date > filterDateTo) return false
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
         return t.description?.toLowerCase().includes(query) || t.category.toLowerCase().includes(query)
@@ -45,6 +67,8 @@ export default function TransactionsPage() {
       return true
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  const visibleTransactions = filteredTransactions.slice(0, visibleCount)
 
   const currentMonth = getCurrentMonth()
   const monthlyIncome = transactions
@@ -171,6 +195,34 @@ export default function TransactionsPage() {
                     </option>
                   ))}
               </select>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={filterDateFrom}
+                  onChange={(e) => setFilterDateFrom(e.target.value)}
+                  className="bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                  aria-label="From date"
+                />
+                <span className="font-mono text-xs text-muted-foreground">TO</span>
+                <input
+                  type="date"
+                  value={filterDateTo}
+                  onChange={(e) => setFilterDateTo(e.target.value)}
+                  className="bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                  aria-label="To date"
+                />
+              </div>
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="px-3 py-2 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary hover:text-foreground transition-colors"
+                >
+                  CLEAR FILTERS
+                </button>
+              )}
             </div>
           </div>
 
@@ -188,10 +240,19 @@ export default function TransactionsPage() {
                 <div className="font-mono text-xs text-muted-foreground mt-1">
                   {transactions.length === 0 ? "CREATE YOUR FIRST TRANSACTION TO BEGIN" : "TRY ADJUSTING YOUR FILTERS"}
                 </div>
+                {hasActiveFilters && transactions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="mt-4 px-4 py-2 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary hover:text-foreground transition-colors"
+                  >
+                    CLEAR FILTERS
+                  </button>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {filteredTransactions.map((transaction) => (
+                {visibleTransactions.map((transaction) => (
                   <div
                     key={transaction.id}
                     className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors"
@@ -245,18 +306,44 @@ export default function TransactionsPage() {
                         {formatCurrency(transaction.amount)}
                       </div>
                       <div className="font-mono text-xs text-muted-foreground">{formatDate(transaction.date)}</div>
-                      <div className="mt-1 flex justify-end">
-                        <button
-                          onClick={() => void handleDelete(transaction.id)}
-                          className="p-1 hover:bg-destructive/10 rounded transition-colors"
-                          title="Delete transaction"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                        </button>
+                      <div className="mt-1 flex justify-end gap-1 items-center">
+                        {transaction.isSystemGenerated ? (
+                          <span className="font-mono text-[10px] text-muted-foreground border border-border rounded px-1.5 py-0.5">
+                            SYSTEM
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setEditingTransaction(transaction)}
+                              className="p-1 hover:bg-secondary rounded transition-colors"
+                              title="Edit transaction"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
+                            </button>
+                            <button
+                              onClick={() => void handleDelete(transaction.id)}
+                              className="p-1 hover:bg-destructive/10 rounded transition-colors"
+                              title="Delete transaction"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+            {visibleCount < filteredTransactions.length && (
+              <div className="p-4 border-t border-border flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((count) => count + 25)}
+                  className="px-4 py-2 border border-border text-muted-foreground font-mono text-xs rounded hover:bg-secondary hover:text-foreground transition-colors"
+                >
+                  LOAD MORE ({filteredTransactions.length - visibleCount} REMAINING)
+                </button>
               </div>
             )}
           </div>
@@ -264,14 +351,19 @@ export default function TransactionsPage() {
       </div>
 
       {/* Transaction Modal */}
-      {showModal && (
+      {(showModal || editingTransaction) && (
         <TransactionModal
-          accounts={accounts.filter((a) => a.isActive)}
+          accounts={accounts}
           categories={categories}
-          onClose={() => setShowModal(false)}
+          transaction={editingTransaction}
+          onClose={() => {
+            setShowModal(false)
+            setEditingTransaction(null)
+          }}
           onSave={async () => {
             await loadData()
             setShowModal(false)
+            setEditingTransaction(null)
           }}
           onAddCategory={async (category) => {
             await apiStorage.addCategory(category)
@@ -286,23 +378,27 @@ export default function TransactionsPage() {
 function TransactionModal({
   accounts,
   categories,
+  transaction,
   onClose,
   onSave,
   onAddCategory,
 }: {
   accounts: Account[]
   categories: Category[]
+  transaction?: Transaction | null
   onClose: () => void
   onSave: () => Promise<void>
   onAddCategory: (category: { name: string; type: "income" | "expense" }) => Promise<void>
 }) {
-  const [type, setType] = useState<"income" | "expense" | "transfer">("expense")
-  const [amount, setAmount] = useState("")
-  const [category, setCategory] = useState("")
-  const [description, setDescription] = useState("")
-  const [accountId, setAccountId] = useState(accounts[0]?.id || "")
-  const [toAccountId, setToAccountId] = useState("")
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0])
+  const isEditing = Boolean(transaction)
+  const selectableAccounts = isEditing ? accounts : accounts.filter((a) => a.isActive)
+  const [type, setType] = useState<"income" | "expense" | "transfer">(transaction?.type || "expense")
+  const [amount, setAmount] = useState(transaction?.amount?.toString() || "")
+  const [category, setCategory] = useState(transaction?.category || "")
+  const [description, setDescription] = useState(transaction?.description || "")
+  const [accountId, setAccountId] = useState(transaction?.accountId || selectableAccounts[0]?.id || "")
+  const [toAccountId, setToAccountId] = useState(transaction?.toAccountId || "")
+  const [date, setDate] = useState(transaction?.date || new Date().toISOString().split("T")[0])
   const [recurrenceRule, setRecurrenceRule] = useState<"" | "weekly" | "monthly">("")
   const [recurrenceEndDate, setRecurrenceEndDate] = useState("")
   const [error, setError] = useState("")
@@ -312,10 +408,10 @@ function TransactionModal({
   const filteredCategories = categories.filter((c) => (type === "transfer" ? false : c.type === type))
 
   useEffect(() => {
-    if (filteredCategories.length > 0 && !category) {
+    if (!isEditing && filteredCategories.length > 0 && !category) {
       setCategory(filteredCategories[0].name)
     }
-  }, [type, filteredCategories, category])
+  }, [type, filteredCategories, category, isEditing])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -326,33 +422,44 @@ function TransactionModal({
       return
     }
 
-    if (!accountId) {
-      setError("SOURCE ACCOUNT REQUIRED")
-      return
-    }
+    if (!isEditing) {
+      if (!accountId) {
+        setError("SOURCE ACCOUNT REQUIRED")
+        return
+      }
 
-    if (type === "transfer" && !toAccountId) {
-      setError("DESTINATION ACCOUNT REQUIRED")
-      return
-    }
+      if (type === "transfer" && !toAccountId) {
+        setError("DESTINATION ACCOUNT REQUIRED")
+        return
+      }
 
-    if (type === "transfer" && accountId === toAccountId) {
-      setError("CANNOT TRANSFER TO SAME ACCOUNT")
-      return
+      if (type === "transfer" && accountId === toAccountId) {
+        setError("CANNOT TRANSFER TO SAME ACCOUNT")
+        return
+      }
     }
 
     try {
-      await apiStorage.addTransaction({
-        type,
-        amount: Number.parseFloat(amount),
-        category: type === "transfer" ? "Transfer" : category,
-        description: description.trim().toUpperCase(),
-        accountId,
-        toAccountId: type === "transfer" ? toAccountId : undefined,
-        date,
-        recurrenceRule: type === "transfer" ? undefined : recurrenceRule || undefined,
-        recurrenceEndDate: type === "transfer" ? undefined : recurrenceEndDate || undefined,
-      })
+      if (isEditing && transaction) {
+        await apiStorage.updateTransaction(transaction.id, {
+          amount: Number.parseFloat(amount),
+          category: type === "transfer" ? transaction.category : category,
+          description: description.trim().toUpperCase(),
+          date,
+        })
+      } else {
+        await apiStorage.addTransaction({
+          type,
+          amount: Number.parseFloat(amount),
+          category: type === "transfer" ? "Transfer" : category,
+          description: description.trim().toUpperCase(),
+          accountId,
+          toAccountId: type === "transfer" ? toAccountId : undefined,
+          date,
+          recurrenceRule: type === "transfer" ? undefined : recurrenceRule || undefined,
+          recurrenceEndDate: type === "transfer" ? undefined : recurrenceEndDate || undefined,
+        })
+      }
 
       await onSave()
     } catch (err) {
@@ -380,7 +487,9 @@ function TransactionModal({
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-card border border-border rounded-lg w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="font-mono text-sm text-foreground">NEW TRANSACTION ENTRY</h2>
+          <h2 className="font-mono text-sm text-foreground">
+            {isEditing ? "MODIFY TRANSACTION ENTRY" : "NEW TRANSACTION ENTRY"}
+          </h2>
           <button onClick={onClose} className="p-1 hover:bg-secondary rounded transition-colors">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
@@ -395,11 +504,12 @@ function TransactionModal({
                 <button
                   key={t}
                   type="button"
+                  disabled={isEditing}
                   onClick={() => {
                     setType(t)
                     setCategory("")
                   }}
-                  className={`p-3 rounded border font-mono text-xs transition-colors ${
+                  className={`p-3 rounded border font-mono text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     type === t
                       ? t === "income"
                         ? "bg-success/10 border-success text-success"
@@ -444,9 +554,10 @@ function TransactionModal({
               <select
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
-                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                disabled={isEditing}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {accounts.map((account) => (
+                {selectableAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.name}
                   </option>
@@ -460,10 +571,11 @@ function TransactionModal({
                 <select
                   value={toAccountId}
                   onChange={(e) => setToAccountId(e.target.value)}
-                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+                  disabled={isEditing}
+                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="">SELECT...</option>
-                  {accounts
+                  {selectableAccounts
                     .filter((a) => a.id !== accountId)
                     .map((account) => (
                       <option key={account.id} value={account.id}>
@@ -563,7 +675,7 @@ function TransactionModal({
             />
           </div>
 
-          {type !== "transfer" && (
+          {!isEditing && type !== "transfer" && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="font-mono text-xs text-muted-foreground block mb-2">REPEAT</label>
@@ -612,7 +724,7 @@ function TransactionModal({
               type="submit"
               className="flex-1 px-4 py-2 bg-primary text-primary-foreground font-mono text-sm rounded hover:bg-primary/90 transition-colors"
             >
-              RECORD ENTRY
+              {isEditing ? "UPDATE" : "RECORD ENTRY"}
             </button>
           </div>
         </form>

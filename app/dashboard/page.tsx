@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
@@ -552,7 +553,12 @@ export default function DashboardPage() {
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               <div className="p-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-mono text-sm text-foreground">RECENT TRANSACTIONS</h2>
-                <span className="font-mono text-xs text-muted-foreground">LAST 5 RECORDS</span>
+                <Link
+                  href="/dashboard/transactions"
+                  className="font-mono text-xs text-primary hover:underline"
+                >
+                  VIEW ALL
+                </Link>
               </div>
               <div className="divide-y divide-border">
                 {recentTransactions.length === 0 ? (

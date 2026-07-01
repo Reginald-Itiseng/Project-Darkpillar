@@ -24,6 +24,7 @@ interface StoredSinglePaymentLoanModel {
 }
 
 const LOAN_MODEL_PREFIX = '__SINGLE_PAYMENT_MODEL__:'
+const MAX_MATERIALIZE_ITERATIONS = 500
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100
@@ -278,7 +279,14 @@ async function materializeRecurringTransactions(userId: string): Promise<void> {
       )
 
       let nextDate = maxExistingResult.rows[0]?.maxDate || source.date
+      let iterations = 0
       while (true) {
+        iterations += 1
+        if (iterations > MAX_MATERIALIZE_ITERATIONS) {
+          console.warn(`materializeRecurringTransactions: hit iteration cap for recurring transaction ${source.id}`)
+          break
+        }
+
         nextDate =
           source.recurrenceRule === 'weekly'
             ? addDays(nextDate, 7)
@@ -365,18 +373,6 @@ async function materializeRecurringTransactions(userId: string): Promise<void> {
           await client.query(
             'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
             [source.amount, source.toAccountId, userId]
-          )
-        }
-
-        if (source.type === 'expense') {
-          const month = nextDate.substring(0, 7)
-          await client.query(
-            `
-            UPDATE public.budgets
-            SET spent = spent + $1
-            WHERE user_id = $2 AND category = $3 AND month = $4
-            `,
-            [source.amount, userId, source.category, month]
           )
         }
       }
@@ -511,19 +507,6 @@ export async function addTransaction(
       )
     }
 
-    // Update budget if expense
-    if (trans.type === 'expense') {
-      const month = trans.date.substring(0, 7)
-      await client.query(
-        `
-        UPDATE public.budgets
-        SET spent = spent + $1
-        WHERE user_id = $2 AND category = $3 AND month = $4
-        `,
-        [trans.amount, userId, trans.category, month]
-      )
-    }
-
     return transResult.rows[0]
   }, userId)
 }
@@ -550,7 +533,9 @@ export async function deleteTransaction(userId: string, transactionId: string): 
     const trans = existing.rows[0]
     if (!trans) return false
 
-    // Reverse the balance and budget effects applied during insertion.
+    // Reverse the balance effects applied during insertion. Budget "spent" is
+    // derived from transactions at read time (see getBudgets), so no budget
+    // reversal is needed here.
     if (trans.type === 'income') {
       await client.query(
         'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
@@ -560,16 +545,6 @@ export async function deleteTransaction(userId: string, transactionId: string): 
       await client.query(
         'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
         [trans.amount, trans.accountId, userId]
-      )
-
-      const month = trans.date.substring(0, 7)
-      await client.query(
-        `
-        UPDATE public.budgets
-        SET spent = GREATEST(spent - $1, 0)
-        WHERE user_id = $2 AND category = $3 AND month = $4
-        `,
-        [trans.amount, userId, trans.category, month]
       )
     } else if (trans.type === 'transfer' && trans.toAccountId) {
       await client.query(
@@ -594,6 +569,128 @@ export async function deleteTransaction(userId: string, transactionId: string): 
     )
 
     return (deleted.rowCount || 0) > 0
+  }, userId)
+}
+
+export async function updateTransaction(
+  userId: string,
+  transactionId: string,
+  updates: { amount?: number; category?: string; description?: string; date?: string }
+): Promise<Transaction | null> {
+  return transaction(async (client) => {
+    const existing = await client.query<
+      Pick<Transaction, 'id' | 'type' | 'amount' | 'category' | 'description' | 'accountId' | 'toAccountId' | 'date' | 'isSystemGenerated'>
+    >(
+      `
+      SELECT
+        id,
+        type,
+        amount,
+        category,
+        description,
+        account_id as "accountId",
+        to_account_id as "toAccountId",
+        date,
+        is_system_generated as "isSystemGenerated"
+      FROM public.transactions
+      WHERE id = $1 AND user_id = $2
+      FOR UPDATE
+      `,
+      [transactionId, userId]
+    )
+
+    const trans = existing.rows[0]
+    if (!trans) return null
+    if (trans.isSystemGenerated) {
+      const error = new Error('System-generated entries cannot be edited directly') as Error & { statusCode?: number }
+      error.statusCode = 400
+      throw error
+    }
+
+    // Reverse the OLD amount's effect on account balance, then reapply with the
+    // NEW amount. Type and accounts are never changed by an edit, so this
+    // mirrors deleteTransaction's reversal for the applicable branch only.
+    if (trans.type === 'income') {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+    } else if (trans.type === 'expense') {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+    } else if (trans.type === 'transfer' && trans.toAccountId) {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.toAccountId, userId]
+      )
+    } else if (trans.type === 'transfer' && !trans.toAccountId) {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [trans.amount, trans.accountId, userId]
+      )
+    }
+
+    const newAmount = updates.amount !== undefined ? roundMoney(updates.amount) : Number(trans.amount)
+    const newCategory = updates.category !== undefined ? updates.category : trans.category
+    const newDescription = updates.description !== undefined ? updates.description : trans.description
+    const newDate = updates.date !== undefined ? updates.date : trans.date
+
+    if (trans.type === 'income') {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [newAmount, trans.accountId, userId]
+      )
+    } else if (trans.type === 'expense') {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [newAmount, trans.accountId, userId]
+      )
+    } else if (trans.type === 'transfer' && trans.toAccountId) {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+        [newAmount, trans.accountId, userId]
+      )
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [newAmount, trans.toAccountId, userId]
+      )
+    } else if (trans.type === 'transfer' && !trans.toAccountId) {
+      await client.query(
+        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+        [newAmount, trans.accountId, userId]
+      )
+    }
+
+    const updated = await client.query<Transaction>(
+      `
+      UPDATE public.transactions
+      SET amount = $1, category = $2, description = $3, date = $4
+      WHERE id = $5 AND user_id = $6
+      RETURNING
+        id,
+        type,
+        amount,
+        category,
+        description,
+        account_id as "accountId",
+        to_account_id as "toAccountId",
+        date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate",
+        parent_transaction_id as "parentTransactionId",
+        is_system_generated as "isSystemGenerated",
+        created_at as "createdAt"
+      `,
+      [newAmount, newCategory, newDescription, newDate, transactionId, userId]
+    )
+
+    return updated.rows[0] || null
   }, userId)
 }
 
@@ -630,7 +727,14 @@ async function materializeRecurringBudgets(userId: string): Promise<void> {
 
     for (const [category, template] of templateByCategory.entries()) {
       let nextMonth = addMonths(template.month, 1)
+      let iterations = 0
       while (nextMonth <= currentMonth) {
+        iterations += 1
+        if (iterations > MAX_MATERIALIZE_ITERATIONS) {
+          console.warn(`materializeRecurringBudgets: hit iteration cap for category ${category}`)
+          break
+        }
+
         const existingResult = await client.query<{ exists: boolean }>(
           `
           SELECT EXISTS (
@@ -682,17 +786,25 @@ export async function getBudgets(userId: string): Promise<Budget[]> {
 
     const result = await query<Budget>(
       `
-      SELECT 
-        id,
-        category,
-        amount,
-        spent,
-        month,
-        is_recurring as "isRecurring",
-        created_at as "createdAt"
-      FROM public.budgets
-      WHERE user_id = $1
-      ORDER BY month DESC, category ASC
+      SELECT
+        b.id,
+        b.category,
+        b.amount,
+        COALESCE((
+          SELECT SUM(t.amount)
+          FROM public.transactions t
+          WHERE t.user_id = b.user_id
+            AND t.type = 'expense'
+            AND t.category = b.category
+            AND t.date >= (b.month || '-01')::date
+            AND t.date < ((b.month || '-01')::date + INTERVAL '1 month')
+        ), 0) as spent,
+        b.month,
+        b.is_recurring as "isRecurring",
+        b.created_at as "createdAt"
+      FROM public.budgets b
+      WHERE b.user_id = $1
+      ORDER BY b.month DESC, b.category ASC
       `,
       [userId],
       userId
@@ -777,7 +889,6 @@ export async function updateBudget(
       category: 'category',
       amount: 'amount',
       month: 'month',
-      spent: 'spent',
       isRecurring: 'is_recurring',
     }
 
@@ -791,21 +902,42 @@ export async function updateBudget(
 
     if (!setClause) return null
 
-    const result = await query<Budget>(
+    const updated = await query<{ id: string }>(
       `
       UPDATE public.budgets
       SET ${setClause}
       WHERE id = $1 AND user_id = $${filteredEntries.length + 2}
-      RETURNING 
-        id,
-        category,
-        amount,
-        spent,
-        month,
-        is_recurring as "isRecurring",
-        created_at as "createdAt"
+      RETURNING id
       `,
       [budgetId, ...filteredEntries.map(([, value]) => value), userId],
+      userId
+    )
+
+    const updatedId = updated.rows[0]?.id
+    if (!updatedId) return null
+
+    const result = await query<Budget>(
+      `
+      SELECT
+        b.id,
+        b.category,
+        b.amount,
+        COALESCE((
+          SELECT SUM(t.amount)
+          FROM public.transactions t
+          WHERE t.user_id = b.user_id
+            AND t.type = 'expense'
+            AND t.category = b.category
+            AND t.date >= (b.month || '-01')::date
+            AND t.date < ((b.month || '-01')::date + INTERVAL '1 month')
+        ), 0) as spent,
+        b.month,
+        b.is_recurring as "isRecurring",
+        b.created_at as "createdAt"
+      FROM public.budgets b
+      WHERE b.id = $1 AND b.user_id = $2
+      `,
+      [updatedId, userId],
       userId
     )
 
@@ -1987,16 +2119,6 @@ export async function addLoanPayment(
           payment.accountId,
           payment.paymentDate,
         ]
-      )
-
-      const month = payment.paymentDate.substring(0, 7)
-      await client.query(
-        `
-        UPDATE public.budgets
-        SET spent = spent + $1
-        WHERE user_id = $2 AND category = 'Loan Interest' AND month = $3
-        `,
-        [interestComponent, userId, month]
       )
     }
 

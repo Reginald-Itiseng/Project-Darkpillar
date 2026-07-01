@@ -354,6 +354,25 @@ export async function addTransaction(transaction: Omit<Transaction, 'id' | 'crea
   return normalizeTransaction(data.transaction)
 }
 
+export async function updateTransaction(
+  id: string,
+  updates: { amount?: number; category?: string; description?: string; date?: string }
+): Promise<Transaction> {
+  const response = await fetch(`/api/financial/transactions?id=${id}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(updates),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to update transaction'))
+  }
+
+  const data = await response.json()
+  return normalizeTransaction(data.transaction)
+}
+
 export async function getUpcomingObligations(daysAhead = 30): Promise<Array<{
   id: string
   kind: 'loan' | 'recurring-expense'

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getTransactions, addTransaction, deleteTransaction } from '@/lib/db-financial'
+import { getTransactions, addTransaction, deleteTransaction, updateTransaction } from '@/lib/db-financial'
 import { getSessionByToken, ensureFinancialUserLink } from '@/lib/db-auth'
 import { toApiError } from '@/lib/api-error'
 import type { Transaction } from '@/lib/types'
@@ -179,6 +179,106 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating transaction:', error)
     const { status, message } = toApiError(error, 'Failed to create transaction')
+    return NextResponse.json(
+      { error: message },
+      { status }
+    )
+  }
+}
+
+/**
+ * PUT /api/financial/transactions?id=<id>
+ * Edit amount/category/description/date on an existing transaction.
+ * Type and account(s) cannot be changed via this endpoint.
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const userId = await getUserIdFromRequest(request)
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const url = new URL(request.url)
+    const transactionId = url.searchParams.get('id')
+    if (!transactionId) {
+      return NextResponse.json(
+        { error: 'Transaction ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const body = await request.json().catch(() => ({}))
+
+    if ('type' in body || 'accountId' in body || 'toAccountId' in body) {
+      return NextResponse.json(
+        { error: 'Changing transaction type or account is not supported — delete and re-create instead' },
+        { status: 400 }
+      )
+    }
+
+    const updates: { amount?: number; category?: string; description?: string; date?: string } = {}
+
+    if (body.amount !== undefined) {
+      const parsedAmount = Number(body.amount)
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        return NextResponse.json(
+          { error: 'Amount must be greater than zero' },
+          { status: 400 }
+        )
+      }
+      updates.amount = parsedAmount
+    }
+
+    if (body.category !== undefined) {
+      const normalizedCategory = String(body.category).trim()
+      if (!normalizedCategory) {
+        return NextResponse.json(
+          { error: 'Category is required' },
+          { status: 400 }
+        )
+      }
+      updates.category = normalizedCategory
+    }
+
+    if (body.description !== undefined) {
+      updates.description = String(body.description).trim().toUpperCase()
+    }
+
+    if (body.date !== undefined) {
+      const normalizedDate = String(body.date).trim()
+      if (!isValidDateOnly(normalizedDate)) {
+        return NextResponse.json(
+          { error: 'Date must use YYYY-MM-DD format' },
+          { status: 400 }
+        )
+      }
+      updates.date = normalizedDate
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json(
+        { error: 'No editable fields provided' },
+        { status: 400 }
+      )
+    }
+
+    await ensureFinancialUserLink(userId)
+
+    const trans = await updateTransaction(userId, transactionId, updates)
+    if (!trans) {
+      return NextResponse.json(
+        { error: 'Transaction not found' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({ transaction: trans }, { status: 200 })
+  } catch (error) {
+    console.error('Error updating transaction:', error)
+    const { status, message } = toApiError(error, 'Failed to update transaction')
     return NextResponse.json(
       { error: message },
       { status }
