@@ -530,6 +530,30 @@ export async function deleteGoal(id: string): Promise<void> {
   }
 }
 
+export async function contributeToGoal(payload: {
+  goalId: string
+  accountId: string
+  amount: number
+  date?: string
+}): Promise<{ goal: Goal; transaction: Transaction }> {
+  const response = await fetch('/api/financial/goals/contribute', {
+    method: 'POST',
+    credentials: 'include',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to record goal contribution'))
+  }
+
+  const data = await response.json()
+  return {
+    goal: normalizeGoal(data.goal),
+    transaction: normalizeTransaction(data.transaction),
+  }
+}
+
 // ============================================================================
 // CATEGORIES
 // ============================================================================

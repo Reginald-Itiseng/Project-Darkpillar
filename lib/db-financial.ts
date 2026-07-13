@@ -1131,6 +1131,118 @@ export async function deleteGoal(userId: string, goalId: string): Promise<boolea
   }
 }
 
+export async function contributeToGoal(
+  userId: string,
+  goalId: string,
+  payload: { accountId: string; amount: number; date?: string }
+): Promise<{ goal: Goal; transaction: Transaction }> {
+  return transaction(async (client) => {
+    const goalResult = await client.query<Goal>(
+      `
+      SELECT
+        id,
+        name,
+        target_amount as "targetAmount",
+        current_amount as "currentAmount",
+        deadline,
+        priority,
+        status,
+        created_at as "createdAt"
+      FROM public.goals
+      WHERE id = $1 AND user_id = $2
+      FOR UPDATE
+      `,
+      [goalId, userId]
+    )
+
+    const goal = goalResult.rows[0]
+    if (!goal) throw new Error('Goal not found')
+    if (goal.status !== 'active') throw new Error('Only active goals can receive contributions')
+
+    const amount = roundMoney(payload.amount)
+    if (amount <= 0) throw new Error('Contribution amount must be greater than zero')
+
+    const contributionDate = payload.date || new Date().toISOString().slice(0, 10)
+
+    const accountDebit = await client.query(
+      'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+      [amount, payload.accountId, userId]
+    )
+    if (!accountDebit.rowCount) throw new Error('Contribution account not found')
+
+    const transactionResult = await client.query<Transaction>(
+      `
+      INSERT INTO public.transactions (
+        id,
+        user_id,
+        type,
+        amount,
+        category,
+        description,
+        account_id,
+        to_account_id,
+        date,
+        created_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        $1,
+        'expense',
+        $2,
+        'Savings',
+        $3,
+        $4,
+        NULL,
+        $5,
+        NOW()
+      )
+      RETURNING
+        id,
+        type,
+        amount,
+        category,
+        description,
+        account_id as "accountId",
+        to_account_id as "toAccountId",
+        date,
+        recurrence_rule as "recurrenceRule",
+        recurrence_end_date as "recurrenceEndDate",
+        parent_transaction_id as "parentTransactionId",
+        is_system_generated as "isSystemGenerated",
+        created_at as "createdAt"
+      `,
+      [userId, amount, `GOAL CONTRIBUTION - ${goal.name.toUpperCase()}`, payload.accountId, contributionDate]
+    )
+
+    const newCurrentAmount = roundMoney((Number(goal.currentAmount) || 0) + amount)
+    const newStatus = newCurrentAmount >= Number(goal.targetAmount) ? 'completed' : goal.status
+
+    const updatedGoalResult = await client.query<Goal>(
+      `
+      UPDATE public.goals
+      SET current_amount = $1, status = $2
+      WHERE id = $3 AND user_id = $4
+      RETURNING
+        id,
+        name,
+        target_amount as "targetAmount",
+        current_amount as "currentAmount",
+        deadline,
+        priority,
+        status,
+        created_at as "createdAt"
+      `,
+      [newCurrentAmount, newStatus, goalId, userId]
+    )
+
+    const updatedGoal = updatedGoalResult.rows[0]
+    const createdTransaction = transactionResult.rows[0]
+    if (!updatedGoal || !createdTransaction) throw new Error('Failed to record goal contribution')
+
+    return { goal: updatedGoal, transaction: createdTransaction }
+  }, userId)
+}
+
 // ============================================================================
 // CATEGORIES
 // ============================================================================

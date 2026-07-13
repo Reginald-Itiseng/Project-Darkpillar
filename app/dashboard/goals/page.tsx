@@ -6,20 +6,22 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
-import type { Goal } from "@/lib/types"
+import type { Account, Goal } from "@/lib/types"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Plus, Target, X, Edit2, Trash2, CheckCircle, Pause, Play, AlertTriangle, Clock, Flag } from "lucide-react"
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
   const [showModal, setShowModal] = useState(false)
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
   const [showContributeModal, setShowContributeModal] = useState<Goal | null>(null)
   const [filter, setFilter] = useState<"all" | "active" | "completed" | "paused">("all")
 
   const loadGoals = async () => {
-    const nextGoals = await apiStorage.getGoals()
+    const [nextGoals, nextAccounts] = await Promise.all([apiStorage.getGoals(), apiStorage.getAccounts()])
     setGoals(nextGoals)
+    setAccounts(nextAccounts)
   }
 
   useEffect(() => {
@@ -349,6 +351,7 @@ export default function GoalsPage() {
       {showContributeModal && (
         <ContributeModal
           goal={showContributeModal}
+          accounts={accounts.filter((account) => account.isActive)}
           onClose={() => setShowContributeModal(null)}
           onSave={async () => {
             await loadGoals()
@@ -529,14 +532,18 @@ function GoalModal({
 
 function ContributeModal({
   goal,
+  accounts,
   onClose,
   onSave,
 }: {
   goal: Goal
+  accounts: Account[]
   onClose: () => void
   onSave: () => Promise<void>
 }) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "")
   const [amount, setAmount] = useState("")
+  const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState("")
 
   const remaining = goal.targetAmount - goal.currentAmount
@@ -545,23 +552,29 @@ function ContributeModal({
     e.preventDefault()
     setError("")
 
+    if (!accountId) {
+      setError("SOURCE ACCOUNT REQUIRED")
+      return
+    }
+
     if (!amount || Number.parseFloat(amount) <= 0) {
       setError("VALID AMOUNT REQUIRED")
       return
     }
 
-    const newAmount = goal.currentAmount + Number.parseFloat(amount)
-    const status = newAmount >= goal.targetAmount ? "completed" : goal.status
-
+    setIsSaving(true)
     try {
-      await apiStorage.updateGoal(goal.id, {
-        currentAmount: Math.min(newAmount, goal.targetAmount),
-        status,
+      await apiStorage.contributeToGoal({
+        goalId: goal.id,
+        accountId,
+        amount: Number.parseFloat(amount),
       })
 
       await onSave()
     } catch (err) {
-      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO UPDATE GOAL")
+      setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO RECORD CONTRIBUTION")
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -584,8 +597,29 @@ function ContributeModal({
             </div>
           </div>
 
+          {accounts.length === 0 ? (
+            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+              NO ACTIVE ACCOUNTS AVAILABLE. CREATE AN ACCOUNT BEFORE CONTRIBUTING.
+            </div>
+          ) : (
+            <div>
+              <label className="block font-mono text-xs text-muted-foreground mb-2">SOURCE ACCOUNT</label>
+              <select
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+              >
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} | {formatCurrency(account.balance)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div>
-            <label className="font-mono text-xs text-muted-foreground block mb-2">CONTRIBUTION (P)</label>
+            <label className="block font-mono text-xs text-muted-foreground mb-2">CONTRIBUTION (P)</label>
             <input
               type="number"
               step="0.01"
@@ -631,15 +665,17 @@ function ContributeModal({
             <button
               type="button"
               onClick={onClose}
+              disabled={isSaving}
               className="flex-1 px-4 py-2 border border-border text-muted-foreground font-mono text-sm rounded hover:bg-secondary transition-colors"
             >
               CANCEL
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-success text-success-foreground font-mono text-sm rounded hover:bg-success/90 transition-colors"
+              disabled={isSaving || accounts.length === 0}
+              className="flex-1 px-4 py-2 bg-success text-success-foreground font-mono text-sm rounded hover:bg-success/90 transition-colors disabled:opacity-60"
             >
-              ADD FUNDS
+              {isSaving ? "SAVING..." : "ADD FUNDS"}
             </button>
           </div>
         </form>

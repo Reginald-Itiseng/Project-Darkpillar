@@ -28,14 +28,18 @@ WHAT WORKS WELL
 - Consistent, cohesive terminal/SCP theming throughout, with loading
   states per route.
 
-REAL FUNCTIONAL GAP
---------------------
-- Goal "contributions" don't touch any account. The Goals page lets you
-  bump currentAmount toward a target, but that's just a number edit — no
-  transaction is created, no account is debited. You could "contribute"
-  money you don't have and it'd show 100% funded while your actual
-  balance is untouched. For a finance tracker this is the one place where
-  the numbers can quietly lie to you.
+REAL FUNCTIONAL GAP — FIXED 2026-07-13
+----------------------------------------
+- Goal "contributions" used to not touch any account: the Goals page let
+  you bump currentAmount toward a target with no transaction and no
+  account debit. This has been fixed — the ADD FUNDS modal now requires a
+  source account, and confirming posts a real expense transaction
+  (category "Savings") that debits that account, via a new
+  contributeToGoal() path (lib/db-financial.ts, app/api/financial/
+  goals/contribute/route.ts, lib/api-storage.ts). Goal status flips to
+  "completed" once the running total reaches the target; contributions can
+  now exceed the target (no more silent capping) since the money actually
+  moved.
 
 SECURITY CAVEATS (fine for solo/private use, not for exposing publicly)
 ------------------------------------------------------------------------
@@ -65,7 +69,7 @@ MINOR ROUGH EDGES
 BOTTOM LINE
 -----------
 As a private, single-user tool once a Neon DB is wired up, it's usable
-day-to-day — the money math is trustworthy. Fix the goal-contribution/
-account disconnect first since that's a correctness issue you'd actually
-notice, then treat the security items as "don't put this on the open
-internet" rather than blockers for personal use.
+day-to-day — the money math is trustworthy, and the one real correctness
+gap (goal contributions not touching accounts) is now fixed. Treat the
+security items as "don't put this on the open internet" rather than
+blockers for personal use.
