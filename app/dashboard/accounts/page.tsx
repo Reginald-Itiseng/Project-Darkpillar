@@ -636,48 +636,6 @@ function AccountModal({
           )}
 
           <div>
-            <label className="font-mono text-xs text-muted-foreground block mb-2">ACCOUNT TYPE</label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setType("day-to-day")}
-                className={`p-3 rounded border font-mono text-xs transition-colors ${
-                  type === "day-to-day"
-                    ? "bg-primary/10 border-primary text-primary"
-                    : "bg-secondary border-border text-muted-foreground hover:border-primary/50"
-                }`}
-              >
-                <Wallet className="w-5 h-5 mx-auto mb-1" />
-                CASHPAL
-              </button>
-              <button
-                type="button"
-                onClick={() => setType("savings-pocket")}
-                className={`p-3 rounded border font-mono text-xs transition-colors ${
-                  type === "savings-pocket"
-                    ? "bg-success/10 border-success text-success"
-                    : "bg-secondary border-border text-muted-foreground hover:border-success/50"
-                }`}
-              >
-                <PiggyBank className="w-5 h-5 mx-auto mb-1" />
-                SAVINGS
-              </button>
-              <button
-                type="button"
-                onClick={() => setType("fixed-deposit")}
-                className={`p-3 rounded border font-mono text-xs transition-colors ${
-                  type === "fixed-deposit"
-                    ? "bg-accent/10 border-accent text-accent"
-                    : "bg-secondary border-border text-muted-foreground hover:border-accent/50"
-                }`}
-              >
-                <PiggyBank className="w-5 h-5 mx-auto mb-1" />
-                FIXED
-              </button>
-            </div>
-          </div>
-
-          <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">
               {account ? "CURRENT BALANCE (P)" : "INITIAL BALANCE (P)"}
             </label>
