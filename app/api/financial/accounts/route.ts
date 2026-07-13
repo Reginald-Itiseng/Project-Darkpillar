@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const { name, type, balance, interestRate, maturityDate, depositDate, isActive, isPrimary } = body
+    const { name, type, balance, interestRate, maturityDate, depositDate, isActive, isPrimary, institution, accountProduct } = body
 
     if (!name || !type || balance === undefined || balance === null) {
       return NextResponse.json(
@@ -138,6 +138,9 @@ export async function POST(request: NextRequest) {
       parsedInterestRate = interest
     }
 
+    const normalizedInstitution = institution ? String(institution).trim().slice(0, 80) : undefined
+    const normalizedAccountProduct = accountProduct ? String(accountProduct).trim().slice(0, 80) : undefined
+
     await ensureFinancialUserLink(userId)
 
     const account = await addAccount(userId, {
@@ -149,6 +152,8 @@ export async function POST(request: NextRequest) {
       depositDate: normalizedDepositDate,
       isActive: isActive !== false,
       isPrimary: Boolean(isPrimary),
+      institution: normalizedInstitution,
+      accountProduct: normalizedAccountProduct,
     })
 
     return NextResponse.json({ account }, { status: 201 })
@@ -272,6 +277,14 @@ export async function PUT(request: NextRequest) {
 
     if ('isPrimary' in body) {
       updates.isPrimary = Boolean(body.isPrimary)
+    }
+
+    if ('institution' in body) {
+      updates.institution = body.institution ? String(body.institution).trim().slice(0, 80) : (null as unknown as string)
+    }
+
+    if ('accountProduct' in body) {
+      updates.accountProduct = body.accountProduct ? String(body.accountProduct).trim().slice(0, 80) : (null as unknown as string)
     }
 
     if (updates.type === 'day-to-day' || updates.type === 'savings-pocket') {

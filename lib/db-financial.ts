@@ -84,7 +84,7 @@ export async function getAccounts(userId: string): Promise<Account[]> {
   try {
     const result = await query<Account>(
       `
-      SELECT 
+      SELECT
         id,
         name,
         type,
@@ -94,6 +94,8 @@ export async function getAccounts(userId: string): Promise<Account[]> {
         deposit_date as "depositDate",
         is_active as "isActive",
         is_primary as "isPrimary",
+        institution,
+        account_product as "accountProduct",
         created_at as "createdAt"
       FROM public.accounts
       WHERE user_id = $1
@@ -127,6 +129,8 @@ export async function addAccount(
         deposit_date,
         is_active,
         is_primary,
+        institution,
+        account_product,
         created_at
       )
       VALUES (
@@ -140,9 +144,11 @@ export async function addAccount(
         $7,
         $8,
         $9,
+        $10,
+        $11,
         NOW()
       )
-      RETURNING 
+      RETURNING
         id,
         name,
         type,
@@ -152,6 +158,8 @@ export async function addAccount(
         deposit_date as "depositDate",
         is_active as "isActive",
         is_primary as "isPrimary",
+        institution,
+        account_product as "accountProduct",
         created_at as "createdAt"
       `,
       [
@@ -164,6 +172,8 @@ export async function addAccount(
         account.depositDate || null,
         account.isActive,
         account.isPrimary || false,
+        account.institution || null,
+        account.accountProduct || null,
       ],
       userId
     )
@@ -191,6 +201,8 @@ export async function updateAccount(
       depositDate: 'deposit_date',
       isActive: 'is_active',
       isPrimary: 'is_primary',
+      institution: 'institution',
+      accountProduct: 'account_product',
     }
 
     const filteredEntries = Object.entries(updates).filter(
@@ -208,7 +220,7 @@ export async function updateAccount(
       UPDATE public.accounts
       SET ${setClause}
       WHERE id = $1 AND user_id = $${filteredEntries.length + 2}
-      RETURNING 
+      RETURNING
         id,
         name,
         type,
@@ -218,6 +230,8 @@ export async function updateAccount(
         deposit_date as "depositDate",
         is_active as "isActive",
         is_primary as "isPrimary",
+        institution,
+        account_product as "accountProduct",
         created_at as "createdAt"
       `,
       [accountId, ...filteredEntries.map(([, value]) => value), userId],

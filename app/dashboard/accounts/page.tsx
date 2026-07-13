@@ -8,6 +8,7 @@ import { Header } from "@/components/header"
 import * as apiStorage from "@/lib/api-storage"
 import type { Account, AccountBalanceSnapshot } from "@/lib/types"
 import { formatCurrency, formatDate, calculateInterest } from "@/lib/utils"
+import { ACCOUNT_INSTITUTIONS, getProduct } from "@/lib/account-providers"
 import {
   Plus,
   Wallet,
@@ -338,6 +339,11 @@ function AccountCard({
                 {isFixedDeposit ? "FIXED DEPOSIT" : isSavingsPocket ? "SAVINGS POCKET" : "CASHPAL"}
                 {account.isPrimary && <span className="text-primary ml-2">• PRIMARY</span>}
               </div>
+              {(account.institution || account.accountProduct) && (
+                <div className="font-mono text-[10px] text-muted-foreground/70 uppercase mt-0.5">
+                  {[account.institution, account.accountProduct].filter(Boolean).join(" • ")}
+                </div>
+              )}
             </div>
           </div>
           <div className="relative">
@@ -427,6 +433,10 @@ function AccountModal({
   onClose: () => void
   onSave: () => Promise<void>
 }) {
+  const initialInstitution = account?.institution
+    ? ACCOUNT_INSTITUTIONS.find((institution) => institution.name === account.institution)
+    : undefined
+
   const [name, setName] = useState(account?.name || "")
   const [type, setType] = useState<"day-to-day" | "savings-pocket" | "fixed-deposit">(account?.type || "day-to-day")
   const [balance, setBalance] = useState(account?.balance?.toString() || "0")
@@ -434,7 +444,41 @@ function AccountModal({
   const [depositDate, setDepositDate] = useState(account?.depositDate || "")
   const [maturityDate, setMaturityDate] = useState(account?.maturityDate || "")
   const [isPrimary, setIsPrimary] = useState(account?.isPrimary || false)
+  const [institutionId, setInstitutionId] = useState(
+    initialInstitution?.id || (account?.institution ? "other" : "")
+  )
+  const [accountProduct, setAccountProduct] = useState(account?.accountProduct || "")
+  const [customInstitutionName, setCustomInstitutionName] = useState(
+    initialInstitution ? "" : account?.institution || ""
+  )
   const [error, setError] = useState("")
+
+  const fnbInstitution = ACCOUNT_INSTITUTIONS.find((institution) => institution.id === "fnb")
+  const fnbGroups = fnbInstitution ? Array.from(new Set(fnbInstitution.products.map((p) => p.group))) : []
+  const mobileMoneyInstitution =
+    institutionId && institutionId !== "fnb" && institutionId !== "other"
+      ? ACCOUNT_INSTITUTIONS.find((institution) => institution.id === institutionId)
+      : undefined
+
+  const handleInstitutionChange = (nextId: string) => {
+    setInstitutionId(nextId)
+
+    if (nextId === "" || nextId === "other") {
+      setAccountProduct("")
+      return
+    }
+
+    const institution = ACCOUNT_INSTITUTIONS.find((item) => item.id === nextId)
+    const firstProduct = institution?.products[0]
+    setAccountProduct(firstProduct?.name || "")
+    if (firstProduct) setType(firstProduct.suggestedType)
+  }
+
+  const handleProductChange = (nextProduct: string) => {
+    setAccountProduct(nextProduct)
+    const product = getProduct(institutionId, nextProduct)
+    if (product) setType(product.suggestedType)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -450,6 +494,15 @@ function AccountModal({
       return
     }
 
+    const resolvedInstitutionName =
+      institutionId === ""
+        ? undefined
+        : institutionId === "other"
+          ? customInstitutionName.trim() || undefined
+          : ACCOUNT_INSTITUTIONS.find((item) => item.id === institutionId)?.name
+
+    const resolvedAccountProduct = institutionId === "" ? undefined : accountProduct.trim() || undefined
+
     const accountData = {
       name: name.trim().toUpperCase(),
       type,
@@ -459,6 +512,8 @@ function AccountModal({
       maturityDate: type === "fixed-deposit" ? maturityDate : undefined,
       isPrimary,
       isActive: account?.isActive ?? true,
+      institution: resolvedInstitutionName,
+      accountProduct: resolvedAccountProduct,
     }
 
     try {
@@ -497,6 +552,88 @@ function AccountModal({
               placeholder="E.G., PRIMARY CHECKING"
             />
           </div>
+
+          <div>
+            <label className="font-mono text-xs text-muted-foreground block mb-2">BANK / PROVIDER</label>
+            <select
+              value={institutionId}
+              onChange={(e) => handleInstitutionChange(e.target.value)}
+              className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+            >
+              <option value="">NO PROVIDER (SKIP)</option>
+              <optgroup label="BANKS">
+                {ACCOUNT_INSTITUTIONS.filter((institution) => institution.category === "bank").map((institution) => (
+                  <option key={institution.id} value={institution.id}>
+                    {institution.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="MOBILE MONEY">
+                {ACCOUNT_INSTITUTIONS.filter((institution) => institution.category === "mobile-money").map(
+                  (institution) => (
+                    <option key={institution.id} value={institution.id}>
+                      {institution.name}
+                    </option>
+                  ),
+                )}
+              </optgroup>
+              <option value="other">OTHER / CUSTOM</option>
+            </select>
+          </div>
+
+          {institutionId === "fnb" && fnbInstitution && (
+            <div>
+              <label className="font-mono text-xs text-muted-foreground block mb-2">ACCOUNT PRODUCT</label>
+              <select
+                value={accountProduct}
+                onChange={(e) => handleProductChange(e.target.value)}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary"
+              >
+                {fnbGroups.map((group) => (
+                  <optgroup key={group} label={group.toUpperCase()}>
+                    {fnbInstitution.products
+                      .filter((product) => product.group === group)
+                      .map((product) => (
+                        <option key={product.name} value={product.name}>
+                          {product.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {mobileMoneyInstitution && (
+            <div className="px-3 py-2 bg-secondary/40 border border-border rounded font-mono text-xs text-muted-foreground">
+              PRODUCT: <span className="text-foreground">{mobileMoneyInstitution.products[0]?.name}</span>
+            </div>
+          )}
+
+          {institutionId === "other" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="font-mono text-xs text-muted-foreground block mb-2">INSTITUTION NAME</label>
+                <input
+                  type="text"
+                  value={customInstitutionName}
+                  onChange={(e) => setCustomInstitutionName(e.target.value)}
+                  placeholder="E.G., STANBIC, CASH"
+                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary uppercase"
+                />
+              </div>
+              <div>
+                <label className="font-mono text-xs text-muted-foreground block mb-2">ACCOUNT PRODUCT (OPTIONAL)</label>
+                <input
+                  type="text"
+                  value={accountProduct}
+                  onChange={(e) => setAccountProduct(e.target.value)}
+                  placeholder="E.G., CURRENT ACCOUNT"
+                  className="w-full bg-secondary border border-border rounded px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-primary uppercase"
+                />
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="font-mono text-xs text-muted-foreground block mb-2">ACCOUNT TYPE</label>

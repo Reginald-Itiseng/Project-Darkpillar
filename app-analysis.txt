@@ -1,0 +1,71 @@
+PROJECT-DARKPILLAR — FUNCTIONALITY ANALYSIS
+=============================================
+Date: 2026-07-13
+
+Overall verdict: usable for personal single-user tracking. The core
+money-flow logic is solid, but there are a few real gaps worth knowing
+before trusting it with actual finances.
+
+WHAT WORKS WELL
+---------------
+- Balance integrity is solid. Every transaction, loan payment, loan
+  disbursement, and delete/edit goes through a real DB transaction that
+  both writes the record AND correctly adjusts account balances
+  (including reversing on delete/edit). Budgets aren't stored as a stale
+  "spent" number — they're computed live from transactions each time, so
+  they can't drift out of sync.
+- Recurring transactions/budgets auto-materialize up to today on each
+  load, with an iteration cap so a bad rule can't infinite-loop.
+- Loans support both a standard amortizing model and a "single-payment
+  flat interest" model, with APR back-calculation and a high-priority-debt
+  (>36% APR) flag — more sophisticated than the rest of the app's polish
+  would suggest.
+- Account reconciliation (log actual vs. app-calculated balance, chart the
+  drift over time) is a nice real-world touch most hobby finance trackers
+  skip.
+- System-generated transactions (loan disbursement/interest) are locked
+  from manual editing — good invariant enforcement.
+- Consistent, cohesive terminal/SCP theming throughout, with loading
+  states per route.
+
+REAL FUNCTIONAL GAP
+--------------------
+- Goal "contributions" don't touch any account. The Goals page lets you
+  bump currentAmount toward a target, but that's just a number edit — no
+  transaction is created, no account is debited. You could "contribute"
+  money you don't have and it'd show 100% funded while your actual
+  balance is untouched. For a finance tracker this is the one place where
+  the numbers can quietly lie to you.
+
+SECURITY CAVEATS (fine for solo/private use, not for exposing publicly)
+------------------------------------------------------------------------
+- PIN hashing uses PBKDF2 with a hardcoded salt ('salt') and only 1000
+  iterations — flagged as a known TODO in the repo itself, but worth
+  knowing this is weak if the DB ever leaked, especially since PINs can be
+  as short as 4 characters.
+- Session token is stored in localStorage in addition to the httpOnly
+  cookie — that duplication means any future XSS could steal the session
+  even though the cookie itself is hardened.
+- No rate limiting or lockout on login/register — a short numeric PIN is
+  brute-forceable if this is ever put on a public URL.
+
+MINOR ROUGH EDGES
+------------------
+- Destructive actions (delete transaction/budget/goal, mark-paid dates)
+  use native confirm()/prompt()/alert() — functional but breaks the
+  styled-UI illusion.
+- No automated tests at all — correctness currently rests entirely on
+  manual testing.
+- Two lockfiles present (package-lock.json and pnpm-lock.yaml) — pick
+  one, having both risks dependency drift depending which tool someone
+  runs.
+- npm audit flagged 3 vulnerabilities (2 high) on install — worth a look
+  before relying on this long-term.
+
+BOTTOM LINE
+-----------
+As a private, single-user tool once a Neon DB is wired up, it's usable
+day-to-day — the money math is trustworthy. Fix the goal-contribution/
+account disconnect first since that's a correctness issue you'd actually
+notice, then treat the security items as "don't put this on the open
+internet" rather than blockers for personal use.

@@ -17,6 +17,8 @@ export interface Account {
   depositDate?: string
   isActive: boolean
   isPrimary?: boolean
+  institution?: string
+  accountProduct?: string
   createdAt: string
 }
 
