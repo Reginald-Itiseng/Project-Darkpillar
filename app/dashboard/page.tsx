@@ -174,30 +174,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center justify-between">
-              <h2 className="font-mono text-sm text-foreground">UPCOMING OBLIGATIONS</h2>
-              <span className="font-mono text-xs text-muted-foreground">NEXT 90 DAYS</span>
-            </div>
-            <div className="divide-y divide-border">
-              {upcomingObligations.length === 0 ? (
-                <div className="p-8 text-center font-mono text-sm text-muted-foreground">NO UPCOMING OBLIGATIONS</div>
-              ) : (
-                upcomingObligations.slice(0, 8).map((item) => (
-                  <div key={item.id} className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors">
-                    <div>
-                      <div className="font-mono text-sm text-foreground">{item.title}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {item.kind === "loan" ? "LOAN LIABILITY" : "RECURRING EXPENSE"} | DUE {formatDate(item.dueDate)}
-                      </div>
-                    </div>
-                    <div className="font-mono text-sm text-warning">{formatCurrency(item.amount)}</div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
             <StatCard
               title="TOTAL ASSETS"
@@ -241,6 +217,30 @@ export default function DashboardPage() {
               color="accent"
               subtitle="GOALS IN PROGRESS"
             />
+          </div>
+
+          <div className="mb-6 bg-card border border-border rounded-lg overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h2 className="font-mono text-sm text-foreground">UPCOMING OBLIGATIONS</h2>
+              <span className="font-mono text-xs text-muted-foreground">NEXT 90 DAYS</span>
+            </div>
+            <div className="divide-y divide-border">
+              {upcomingObligations.length === 0 ? (
+                <div className="p-8 text-center font-mono text-sm text-muted-foreground">NO UPCOMING OBLIGATIONS</div>
+              ) : (
+                upcomingObligations.slice(0, 8).map((item) => (
+                  <div key={item.id} className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors">
+                    <div>
+                      <div className="font-mono text-sm text-foreground">{item.title}</div>
+                      <div className="font-mono text-xs text-muted-foreground">
+                        {item.kind === "loan" ? "LOAN LIABILITY" : "RECURRING EXPENSE"} | DUE {formatDate(item.dueDate)}
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm text-warning">{formatCurrency(item.amount)}</div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
