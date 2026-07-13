@@ -170,9 +170,9 @@ export default function LoansPage() {
 
                   return (
                     <div key={loan.id} className="p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="font-mono text-sm text-foreground">{loan.lenderName}</div>
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono text-sm text-foreground truncate">{loan.lenderName}</div>
                           <div className="font-mono text-xs text-muted-foreground mt-1">
                             ACCOUNT: {accountNames.get(loan.accountId) || "UNKNOWN"} | START: {formatDate(loan.startDate)}
                           </div>
@@ -181,7 +181,7 @@ export default function LoansPage() {
                             <span>DUE: {formatDate(loan.dueDate)}</span>
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right">
                           <div className="font-mono text-xs text-muted-foreground">
                             STATUS:{" "}
                             <span

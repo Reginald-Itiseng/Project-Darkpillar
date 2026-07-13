@@ -1,10 +1,11 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import * as apiStorage from "@/lib/api-storage"
-import { LayoutDashboard, Wallet, ArrowLeftRight, Target, PiggyBank, HandCoins, LogOut, Shield } from "lucide-react"
+import { LayoutDashboard, Wallet, ArrowLeftRight, Target, PiggyBank, HandCoins, LogOut, Shield, Menu, X } from "lucide-react"
 
 const navItems = [
   {
@@ -48,6 +49,7 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const [isOpen, setIsOpen] = useState(false)
 
   const handleLogout = async () => {
     try {
@@ -59,75 +61,100 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-64 bg-card border-r border-border min-h-screen flex flex-col">
-      <div className="p-6 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded bg-primary/10 border border-primary/30 flex items-center justify-center">
-            <Shield className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <div className="font-mono text-sm font-bold text-foreground">SCP-FINANCE</div>
-            <div className="font-mono text-xs text-muted-foreground">LEVEL 4 ACCESS</div>
-          </div>
-        </div>
-      </div>
-
-      <nav className="flex-1 p-4">
-        <div className="px-2 pb-2 font-mono text-xs text-muted-foreground">NAVIGATION MODULES</div>
-        <div className="space-y-1">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded font-mono text-sm transition-colors",
-                  isActive
-                    ? "bg-primary/10 text-primary border border-primary/30"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary",
-                )}
-              >
-                <item.icon className="w-4 h-4" />
-                <div className="min-w-0">
-                  <div>{item.label}</div>
-                  <div className="text-[10px] opacity-80 truncate">{item.hint}</div>
-                </div>
-              </Link>
-            )
-          })}
-
-          <Link
-            href="/dashboard/admin"
-            className={cn(
-              "mt-4 flex items-center gap-3 px-4 py-3 rounded font-mono text-sm transition-colors border",
-              pathname === "/dashboard/admin"
-                ? "bg-warning/10 text-warning border-warning/30"
-                : "text-muted-foreground border-border hover:text-foreground hover:bg-secondary",
-            )}
-          >
-            <Shield className="w-4 h-4" />
-            <div className="min-w-0">
-              <div>ADMIN CONTROLS</div>
-              <div className="text-[10px] opacity-80 truncate">Invite codes and access controls</div>
+    <>
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm md:hidden"
+          onClick={() => setIsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={cn(
+          "fixed md:static inset-y-0 left-0 z-50 w-64 bg-card border-r border-border min-h-screen flex flex-col",
+          "transform transition-transform duration-200 ease-in-out",
+          isOpen ? "translate-x-0" : "-translate-x-full",
+          "md:translate-x-0",
+        )}
+      >
+        <div className="p-6 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded bg-primary/10 border border-primary/30 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-primary" />
             </div>
-          </Link>
+            <div>
+              <div className="font-mono text-sm font-bold text-foreground">SCP-FINANCE</div>
+              <div className="font-mono text-xs text-muted-foreground">LEVEL 4 ACCESS</div>
+            </div>
+          </div>
         </div>
-      </nav>
 
-      <div className="p-4 border-t border-border">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 px-4 py-3 rounded font-mono text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors w-full"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>LOGOUT</span>
-        </button>
-        <div className="mt-4 px-4 font-mono text-xs text-muted-foreground">
-          <div>SECURE SESSION</div>
-          <div className="text-primary">ENCRYPTED LINK</div>
+        <nav className="flex-1 p-4">
+          <div className="px-2 pb-2 font-mono text-xs text-muted-foreground">NAVIGATION MODULES</div>
+          <div className="space-y-1">
+            {navItems.map((item) => {
+              const isActive = pathname === item.href
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setIsOpen(false)}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3 rounded font-mono text-sm transition-colors",
+                    isActive
+                      ? "bg-primary/10 text-primary border border-primary/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                  )}
+                >
+                  <item.icon className="w-4 h-4" />
+                  <div className="min-w-0">
+                    <div>{item.label}</div>
+                    <div className="text-[10px] opacity-80 truncate">{item.hint}</div>
+                  </div>
+                </Link>
+              )
+            })}
+
+            <Link
+              href="/dashboard/admin"
+              onClick={() => setIsOpen(false)}
+              className={cn(
+                "mt-4 flex items-center gap-3 px-4 py-3 rounded font-mono text-sm transition-colors border",
+                pathname === "/dashboard/admin"
+                  ? "bg-warning/10 text-warning border-warning/30"
+                  : "text-muted-foreground border-border hover:text-foreground hover:bg-secondary",
+              )}
+            >
+              <Shield className="w-4 h-4" />
+              <div className="min-w-0">
+                <div>ADMIN CONTROLS</div>
+                <div className="text-[10px] opacity-80 truncate">Invite codes and access controls</div>
+              </div>
+            </Link>
+          </div>
+        </nav>
+
+        <div className="p-4 pb-20 md:pb-4 border-t border-border">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-4 py-3 rounded font-mono text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors w-full"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>LOGOUT</span>
+          </button>
+          <div className="mt-4 px-4 font-mono text-xs text-muted-foreground">
+            <div>SECURE SESSION</div>
+            <div className="text-primary">ENCRYPTED LINK</div>
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+      <button
+        onClick={() => setIsOpen((value) => !value)}
+        className="fixed bottom-4 left-4 z-50 md:hidden bg-card border border-border rounded-full p-3 shadow-lg text-foreground pb-[calc(0.75rem+env(safe-area-inset-bottom))] pl-[calc(0.75rem+env(safe-area-inset-left))]"
+        aria-label={isOpen ? "Close navigation" : "Open navigation"}
+      >
+        {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      </button>
+    </>
   )
 }

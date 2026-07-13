@@ -54,8 +54,8 @@ export function Header() {
   }, [])
 
   return (
-    <header className="h-16 bg-card border-b border-border flex items-center justify-between px-6">
-      <div className="flex items-center gap-3 text-muted-foreground">
+    <header className="h-16 bg-card border-b border-border flex items-center px-3 md:px-6 pt-[env(safe-area-inset-top)]">
+      <div className="hidden md:flex items-center gap-3 text-muted-foreground">
         <Compass className="w-4 h-4" />
         <div className="font-mono text-xs">
           FIELD TIP: Review <span className="text-foreground">OVERVIEW</span> first, then log activity in{" "}
@@ -63,11 +63,13 @@ export function Header() {
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-2 md:gap-6 ml-auto">
         <div className="font-mono text-sm text-muted-foreground">
           <span className="text-primary">{currentTime}</span>
-          <span className="mx-2">|</span>
-          <span>{utcOffset}</span>
+          <span className="hidden md:inline-flex items-center">
+            <span className="mx-2">|</span>
+            <span>{utcOffset}</span>
+          </span>
         </div>
 
         <button className="relative p-2 hover:bg-secondary rounded transition-colors" title="Notifications">
@@ -75,11 +77,11 @@ export function Header() {
           <span className="absolute top-1 right-1 w-2 h-2 bg-warning rounded-full" />
         </button>
 
-        <div className="flex items-center gap-3 pl-4 border-l border-border">
+        <div className="flex items-center gap-3 pl-2 md:pl-4 border-l border-border">
           <div className="w-8 h-8 rounded bg-primary/10 border border-primary/30 flex items-center justify-center font-mono text-sm text-primary">
             {user?.username?.[0] || "A"}
           </div>
-          <div className="font-mono text-sm">
+          <div className="hidden sm:block font-mono text-sm">
             <div className="text-foreground">{user?.username || "AGENT"}</div>
             <div className="text-xs text-muted-foreground">CLEARANCE L4</div>
           </div>

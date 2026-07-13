@@ -255,9 +255,9 @@ export default function TransactionsPage() {
                 {visibleTransactions.map((transaction) => (
                   <div
                     key={transaction.id}
-                    className="p-4 flex items-center justify-between hover:bg-secondary/50 transition-colors"
+                    className="p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between hover:bg-secondary/50 transition-colors"
                   >
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 min-w-0">
                       <div
                         className={`w-10 h-10 rounded flex items-center justify-center ${
                           transaction.type === "income"
@@ -275,11 +275,11 @@ export default function TransactionsPage() {
                           <ArrowLeftRight className="w-5 h-5" />
                         )}
                       </div>
-                      <div>
-                        <div className="font-mono text-sm text-foreground">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-mono text-sm text-foreground truncate">
                           {transaction.description || transaction.category}
                         </div>
-                        <div className="font-mono text-xs text-muted-foreground flex items-center gap-2">
+                        <div className="font-mono text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
                           <span>{transaction.category}</span>
                           <span>•</span>
                           <span>{getAccountName(transaction.accountId)}</span>
@@ -292,7 +292,7 @@ export default function TransactionsPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="flex sm:block items-center justify-between sm:text-right w-full sm:w-auto">
                       <div
                         className={`font-mono text-sm ${
                           transaction.type === "income"
