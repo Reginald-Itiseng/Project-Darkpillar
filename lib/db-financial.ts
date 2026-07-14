@@ -1,3 +1,4 @@
+import type { PoolClient } from '@neondatabase/serverless'
 import { query, transaction } from './db'
 import type { Account, Transaction, Budget, Goal, Category, Loan, LoanPayment, AccountBalanceSnapshot } from './types'
 
@@ -28,6 +29,60 @@ const MAX_MATERIALIZE_ITERATIONS = 500
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100
+}
+
+function insufficientBalanceError(context: string, available: number, required: number): Error & { statusCode: number } {
+  const error = new Error(
+    `Insufficient account balance for ${context}: available ${available}, required ${required}`
+  ) as Error & { statusCode: number }
+  error.statusCode = 400
+  return error
+}
+
+/**
+ * Applies a signed balance change to an account within an existing DB
+ * transaction. Credits (delta >= 0) always succeed. Debits (delta < 0) lock
+ * the account row, verify the balance can cover the debit, and reject with a
+ * 400 if it can't -- this is the single place account-sufficiency is
+ * enforced for every user-initiated balance change (transactions, loan
+ * payments, goal contributions).
+ */
+async function applyAccountDelta(
+  client: PoolClient,
+  userId: string,
+  accountId: string,
+  delta: number,
+  context: string
+): Promise<void> {
+  const rounded = roundMoney(delta)
+  if (rounded === 0) return
+
+  if (rounded > 0) {
+    const result = await client.query(
+      'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
+      [rounded, accountId, userId]
+    )
+    if (!result.rowCount) throw new Error(`Account not found (${context})`)
+    return
+  }
+
+  const debitAmount = roundMoney(-rounded)
+  const accountResult = await client.query<{ balance: string }>(
+    'SELECT balance FROM public.accounts WHERE id = $1 AND user_id = $2 FOR UPDATE',
+    [accountId, userId]
+  )
+  const account = accountResult.rows[0]
+  if (!account) throw new Error(`Account not found (${context})`)
+
+  const available = roundMoney(Number(account.balance) || 0)
+  if (available < debitAmount) {
+    throw insufficientBalanceError(context, available, debitAmount)
+  }
+
+  await client.query(
+    'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
+    [debitAmount, accountId, userId]
+  )
 }
 
 function isRecurrenceRule(value: unknown): value is 'weekly' | 'monthly' {
@@ -249,6 +304,14 @@ export async function updateAccount(
 // TRANSACTIONS
 // ============================================================================
 
+// NOTE: balance changes below intentionally do NOT go through the
+// sufficiency-checked applyAccountDelta() helper. This function runs
+// automatically inside getTransactions() (a read path) to roll forward any
+// recurring rule up to today; a recurring bill is due whether or not the
+// account can currently absorb it (same as a real-world debit order), and
+// throwing here would break simply viewing the transaction list. Overdraft
+// from a recurring rule is expected; sufficiency is only enforced for
+// discrete, user-initiated actions (see applyAccountDelta call sites below).
 async function materializeRecurringTransactions(userId: string): Promise<void> {
   await transaction(async (client) => {
     const recurringResult = await client.query<
@@ -501,24 +564,12 @@ export async function addTransaction(
 
     // Update account balance
     if (trans.type === 'income') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, trans.amount, 'income transaction')
     } else if (trans.type === 'expense') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, -trans.amount, 'expense transaction')
     } else if (trans.type === 'transfer' && trans.toAccountId) {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.toAccountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, -trans.amount, 'transfer transaction')
+      await applyAccountDelta(client, userId, trans.toAccountId, trans.amount, 'transfer transaction')
     }
 
     return transResult.rows[0]
@@ -549,32 +600,19 @@ export async function deleteTransaction(userId: string, transactionId: string): 
 
     // Reverse the balance effects applied during insertion. Budget "spent" is
     // derived from transactions at read time (see getBudgets), so no budget
-    // reversal is needed here.
+    // reversal is needed here. Reversing a prior credit is itself a debit
+    // (e.g. undoing an income or an inbound transfer), so it goes through
+    // applyAccountDelta and can be rejected if the balance can't absorb it.
     if (trans.type === 'income') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, -trans.amount, 'transaction deletion')
     } else if (trans.type === 'expense') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, trans.amount, 'transaction deletion')
     } else if (trans.type === 'transfer' && trans.toAccountId) {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.toAccountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, trans.amount, 'transaction deletion')
+      await applyAccountDelta(client, userId, trans.toAccountId, -trans.amount, 'transaction deletion')
     } else if (trans.type === 'transfer' && !trans.toAccountId) {
       // System inbound transfer (e.g., loan funding): reverse the one-sided credit.
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, -trans.amount, 'transaction deletion')
     }
 
     const deleted = await client.query(
@@ -621,64 +659,26 @@ export async function updateTransaction(
       throw error
     }
 
-    // Reverse the OLD amount's effect on account balance, then reapply with the
-    // NEW amount. Type and accounts are never changed by an edit, so this
-    // mirrors deleteTransaction's reversal for the applicable branch only.
-    if (trans.type === 'income') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
-    } else if (trans.type === 'expense') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
-    } else if (trans.type === 'transfer' && trans.toAccountId) {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.toAccountId, userId]
-      )
-    } else if (trans.type === 'transfer' && !trans.toAccountId) {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [trans.amount, trans.accountId, userId]
-      )
-    }
-
     const newAmount = updates.amount !== undefined ? roundMoney(updates.amount) : Number(trans.amount)
     const newCategory = updates.category !== undefined ? updates.category : trans.category
     const newDescription = updates.description !== undefined ? updates.description : trans.description
     const newDate = updates.date !== undefined ? updates.date : trans.date
 
+    // Apply the NET effect of reversing the OLD amount and reapplying the NEW
+    // amount in a single balance change per account, rather than two separate
+    // updates -- this ensures the sufficiency check (inside applyAccountDelta)
+    // sees the correct post-reversal balance rather than a stale pre-reversal
+    // one. Type and accounts are never changed by an edit, so this mirrors
+    // deleteTransaction's reversal for the applicable branch only.
     if (trans.type === 'income') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [newAmount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, newAmount - trans.amount, 'transaction update')
     } else if (trans.type === 'expense') {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [newAmount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, trans.amount - newAmount, 'transaction update')
     } else if (trans.type === 'transfer' && trans.toAccountId) {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-        [newAmount, trans.accountId, userId]
-      )
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [newAmount, trans.toAccountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, trans.amount - newAmount, 'transaction update')
+      await applyAccountDelta(client, userId, trans.toAccountId, newAmount - trans.amount, 'transaction update')
     } else if (trans.type === 'transfer' && !trans.toAccountId) {
-      await client.query(
-        'UPDATE public.accounts SET balance = balance + $1 WHERE id = $2 AND user_id = $3',
-        [newAmount, trans.accountId, userId]
-      )
+      await applyAccountDelta(client, userId, trans.accountId, newAmount - trans.amount, 'transaction update')
     }
 
     const updated = await client.query<Transaction>(
@@ -1164,11 +1164,7 @@ export async function contributeToGoal(
 
     const contributionDate = payload.date || new Date().toISOString().slice(0, 10)
 
-    const accountDebit = await client.query(
-      'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-      [amount, payload.accountId, userId]
-    )
-    if (!accountDebit.rowCount) throw new Error('Contribution account not found')
+    await applyAccountDelta(client, userId, payload.accountId, -amount, 'goal contribution')
 
     const transactionResult = await client.query<Transaction>(
       `
@@ -1906,11 +1902,7 @@ export async function addLoanPayment(
     )
 
     // Loan repayment always reduces the account by full paid amount.
-    const accountDebit = await client.query(
-      'UPDATE public.accounts SET balance = balance - $1 WHERE id = $2 AND user_id = $3',
-      [totalAmount, payment.accountId, userId]
-    )
-    if (!accountDebit.rowCount) throw new Error('Payment account not found')
+    await applyAccountDelta(client, userId, payment.accountId, -totalAmount, 'loan payment')
 
     if (interestComponent > 0) {
       // Interest is the expense portion for budgeting/cashflow reports.

@@ -17,6 +17,7 @@ export default function GoalsPage() {
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
   const [showContributeModal, setShowContributeModal] = useState<Goal | null>(null)
   const [filter, setFilter] = useState<"all" | "active" | "completed" | "paused">("all")
+  const [actionError, setActionError] = useState("")
 
   const loadGoals = async () => {
     const [nextGoals, nextAccounts] = await Promise.all([apiStorage.getGoals(), apiStorage.getAccounts()])
@@ -39,21 +40,36 @@ export default function GoalsPage() {
   const totalCurrentAmount = activeGoals.reduce((sum, g) => sum + (Number(g.currentAmount) || 0), 0)
 
   const handleDelete = async (id: string) => {
-    if (confirm("CONFIRM GOAL DELETION?")) {
+    if (!confirm("CONFIRM GOAL DELETION?")) return
+
+    setActionError("")
+    try {
       await apiStorage.deleteGoal(id)
       await loadGoals()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message.toUpperCase() : "FAILED TO DELETE OBJECTIVE")
     }
   }
 
   const handleToggleStatus = async (goal: Goal) => {
     const newStatus = goal.status === "paused" ? "active" : "paused"
-    await apiStorage.updateGoal(goal.id, { status: newStatus })
-    await loadGoals()
+    setActionError("")
+    try {
+      await apiStorage.updateGoal(goal.id, { status: newStatus })
+      await loadGoals()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message.toUpperCase() : "FAILED TO UPDATE OBJECTIVE STATUS")
+    }
   }
 
   const handleComplete = async (goal: Goal) => {
-    await apiStorage.updateGoal(goal.id, { status: "completed", currentAmount: goal.targetAmount })
-    await loadGoals()
+    setActionError("")
+    try {
+      await apiStorage.updateGoal(goal.id, { status: "completed", currentAmount: goal.targetAmount })
+      await loadGoals()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message.toUpperCase() : "FAILED TO COMPLETE OBJECTIVE")
+    }
   }
 
   return (
@@ -79,6 +95,12 @@ export default function GoalsPage() {
               NEW OBJECTIVE
             </button>
           </div>
+
+          {actionError && (
+            <div className="mb-6 p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+              {actionError}
+            </div>
+          )}
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

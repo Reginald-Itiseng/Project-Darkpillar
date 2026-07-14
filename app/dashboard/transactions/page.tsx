@@ -22,6 +22,7 @@ export default function TransactionsPage() {
   const [filterDateFrom, setFilterDateFrom] = useState("")
   const [filterDateTo, setFilterDateTo] = useState("")
   const [visibleCount, setVisibleCount] = useState(25)
+  const [actionError, setActionError] = useState("")
 
   const loadData = async () => {
     const [nextTransactions, nextAccounts, nextCategories] = await Promise.all([
@@ -88,8 +89,13 @@ export default function TransactionsPage() {
       return
     }
 
-    await apiStorage.deleteTransaction(transactionId)
-    await loadData()
+    setActionError("")
+    try {
+      await apiStorage.deleteTransaction(transactionId)
+      await loadData()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message.toUpperCase() : "FAILED TO DELETE TRANSACTION")
+    }
   }
 
   return (
@@ -112,6 +118,12 @@ export default function TransactionsPage() {
               NEW ENTRY
             </button>
           </div>
+
+          {actionError && (
+            <div className="mb-6 p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+              {actionError}
+            </div>
+          )}
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

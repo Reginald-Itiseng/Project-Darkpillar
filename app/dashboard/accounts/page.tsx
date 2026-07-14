@@ -33,6 +33,7 @@ export default function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [reconcileAccount, setReconcileAccount] = useState<Account | null>(null)
   const [showMenu, setShowMenu] = useState<string | null>(null)
+  const [actionError, setActionError] = useState("")
 
   const loadAccounts = async () => {
     const [nextAccounts, nextSnapshots] = await Promise.all([
@@ -70,9 +71,15 @@ export default function AccountsPage() {
       : 0
 
   const handleToggleActive = async (account: Account) => {
-    await apiStorage.updateAccount(account.id, { isActive: !account.isActive })
-    await loadAccounts()
-    setShowMenu(null)
+    setActionError("")
+    try {
+      await apiStorage.updateAccount(account.id, { isActive: !account.isActive })
+      await loadAccounts()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message.toUpperCase() : "FAILED TO UPDATE ACCOUNT STATUS")
+    } finally {
+      setShowMenu(null)
+    }
   }
 
   const handleEdit = (account: Account) => {
@@ -104,6 +111,12 @@ export default function AccountsPage() {
               NEW ACCOUNT
             </button>
           </div>
+
+          {actionError && (
+            <div className="mb-6 p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+              {actionError}
+            </div>
+          )}
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

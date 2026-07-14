@@ -27,6 +27,7 @@ export default function BudgetsPage() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
   const [showModal, setShowModal] = useState(false)
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null)
+  const [actionError, setActionError] = useState("")
 
   const loadData = async () => {
     const [nextBudgets, nextCategories] = await Promise.all([apiStorage.getBudgets(), apiStorage.getCategories()])
@@ -51,9 +52,14 @@ export default function BudgetsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (confirm("CONFIRM BUDGET DELETION?")) {
+    if (!confirm("CONFIRM BUDGET DELETION?")) return
+
+    setActionError("")
+    try {
       await apiStorage.deleteBudget(id)
       await loadData()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message.toUpperCase() : "FAILED TO DELETE BUDGET")
     }
   }
 
@@ -85,6 +91,12 @@ export default function BudgetsPage() {
               NEW BUDGET
             </button>
           </div>
+
+          {actionError && (
+            <div className="mb-6 p-3 bg-destructive/10 border border-destructive/30 rounded font-mono text-xs text-destructive">
+              {actionError}
+            </div>
+          )}
 
           {/* Month Navigator */}
           <div className="flex items-center justify-center gap-4 mb-6">
