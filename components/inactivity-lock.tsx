@@ -7,7 +7,9 @@ import { ShieldAlert } from "lucide-react"
 import * as apiStorage from "@/lib/api-storage"
 
 const STORAGE_KEY_TIMEOUT = "inactivity_lock_timeout_ms"
+const STORAGE_KEY_LAST_ACTIVITY = "inactivity_lock_last_activity_at"
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
+const ACTIVITY_PERSIST_THROTTLE_MS = 3000
 const TIMEOUT_OPTIONS_MS = [
   1 * 60 * 1000,
   2 * 60 * 1000,
@@ -29,6 +31,26 @@ function getSavedTimeout(): number {
   return Number.isFinite(parsed) && parsed >= 30000 ? parsed : DEFAULT_TIMEOUT_MS
 }
 
+// Last genuine-activity timestamp, persisted so a page refresh (or a closed
+// and reopened tab) can't reset the idle clock -- only real interaction
+// (mouse/keyboard/touch/scroll) extends it, never just loading the page.
+function getSavedLastActivity(): number {
+  if (typeof window === "undefined") return Date.now()
+  const raw = localStorage.getItem(STORAGE_KEY_LAST_ACTIVITY)
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now()
+}
+
+let lastPersistedActivityWrite = 0
+
+function recordActivity(): void {
+  if (typeof window === "undefined") return
+  const now = Date.now()
+  if (now - lastPersistedActivityWrite < ACTIVITY_PERSIST_THROTTLE_MS) return
+  lastPersistedActivityWrite = now
+  localStorage.setItem(STORAGE_KEY_LAST_ACTIVITY, String(now))
+}
+
 function buildMatrixColumns(columnCount: number): string[] {
   const glyphs = "01ABCDEF#$%&@"
   return Array.from({ length: columnCount }, (_, colIndex) => {
@@ -44,6 +66,7 @@ function buildMatrixColumns(columnCount: number): string[] {
 export function InactivityLock({ children }: { children: React.ReactNode }) {
   const [timeoutMs, setTimeoutMs] = useState<number>(DEFAULT_TIMEOUT_MS)
   const [locked, setLocked] = useState(false)
+  const [isChecking, setIsChecking] = useState(true)
   const [pin, setPin] = useState("")
   const [error, setError] = useState("")
   const [unlocking, setUnlocking] = useState(false)
@@ -66,17 +89,45 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
     }, timeoutMs)
   }
 
+  // Resolve the saved timeout and last-activity timestamp before revealing
+  // anything: if the idle window already elapsed (e.g. the tab was locked,
+  // then refreshed, or was closed and reopened later), lock immediately
+  // instead of starting a fresh countdown. Otherwise resume the countdown
+  // from the time actually remaining, not a brand-new full window.
   useEffect(() => {
-    setTimeoutMs(getSavedTimeout())
+    const savedTimeout = getSavedTimeout()
+    const lastActivity = getSavedLastActivity()
+    const elapsed = Date.now() - lastActivity
+
+    setTimeoutMs(savedTimeout)
+
+    if (elapsed >= savedTimeout) {
+      setLocked(true)
+    } else {
+      timerRef.current = setTimeout(() => {
+        setLocked(true)
+        setPin("")
+        setError("")
+      }, savedTimeout - elapsed)
+    }
+
+    setIsChecking(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
+  const handleTimeoutChange = (nextTimeoutMs: number) => {
+    setTimeoutMs(nextTimeoutMs)
     if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY_TIMEOUT, String(timeoutMs))
+      localStorage.setItem(STORAGE_KEY_TIMEOUT, String(nextTimeoutMs))
     }
-    resetTimer()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeoutMs, locked])
+    recordActivity()
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      setLocked(true)
+      setPin("")
+      setError("")
+    }, nextTimeoutMs)
+  }
 
   useEffect(() => {
     const hydrateIdentity = async () => {
@@ -96,6 +147,8 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (isChecking) return
+
     const events: Array<keyof WindowEventMap> = [
       "mousemove",
       "mousedown",
@@ -105,16 +158,18 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
       "click",
     ]
 
-    const handler = () => resetTimer()
+    const handler = () => {
+      recordActivity()
+      resetTimer()
+    }
     events.forEach((event) => window.addEventListener(event, handler, { passive: true }))
-    resetTimer()
 
     return () => {
       events.forEach((event) => window.removeEventListener(event, handler))
       if (timerRef.current) clearTimeout(timerRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeoutMs, locked])
+  }, [timeoutMs, locked, isChecking])
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -132,12 +187,21 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
       apiStorage.setCurrentUser(user)
       setLocked(false)
       setPin("")
+      recordActivity()
       resetTimer()
     } catch (err) {
       setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO UNLOCK")
     } finally {
       setUnlocking(false)
     }
+  }
+
+  if (isChecking) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="font-mono text-xs text-muted-foreground animate-pulse">VERIFYING SESSION INTEGRITY...</div>
+      </div>
+    )
   }
 
   return (
@@ -148,7 +212,7 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
         <span className="mr-2">AUTO-LOCK</span>
         <select
           value={timeoutMs}
-          onChange={(e) => setTimeoutMs(Number(e.target.value))}
+          onChange={(e) => handleTimeoutChange(Number(e.target.value))}
           className="bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
           disabled={locked}
         >
