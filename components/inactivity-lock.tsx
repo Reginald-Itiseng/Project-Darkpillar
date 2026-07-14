@@ -79,14 +79,27 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
     return `Unlock as ${identifier.toUpperCase()}`
   }, [identifier])
 
-  const resetTimer = () => {
+  // Schedules the lock to engage after `ms`. Used directly (not via
+  // resetTimer) anywhere we already know for certain a fresh countdown
+  // should start -- avoids relying on the `locked` closure variable, which
+  // can be stale (e.g. immediately after setLocked(false) in handleUnlock,
+  // the enclosing function still sees the pre-update value until the next
+  // render).
+  const scheduleLock = (ms: number) => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    if (locked) return
     timerRef.current = setTimeout(() => {
       setLocked(true)
       setPin("")
       setError("")
-    }, timeoutMs)
+    }, ms)
+  }
+
+  // Only for use by the generic activity listener below, where `locked`
+  // reflects the current render (the effect that owns the listener
+  // re-attaches whenever `locked` changes).
+  const resetTimer = () => {
+    if (locked) return
+    scheduleLock(timeoutMs)
   }
 
   // Resolve the saved timeout and last-activity timestamp before revealing
@@ -104,11 +117,7 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
     if (elapsed >= savedTimeout) {
       setLocked(true)
     } else {
-      timerRef.current = setTimeout(() => {
-        setLocked(true)
-        setPin("")
-        setError("")
-      }, savedTimeout - elapsed)
+      scheduleLock(savedTimeout - elapsed)
     }
 
     setIsChecking(false)
@@ -121,12 +130,7 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
       localStorage.setItem(STORAGE_KEY_TIMEOUT, String(nextTimeoutMs))
     }
     recordActivity()
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => {
-      setLocked(true)
-      setPin("")
-      setError("")
-    }, nextTimeoutMs)
+    scheduleLock(nextTimeoutMs)
   }
 
   useEffect(() => {
@@ -158,18 +162,38 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
       "click",
     ]
 
+    // While locked, movement/clicks/keydowns over the (blurred) page must
+    // NOT count as activity -- otherwise they keep bumping the persisted
+    // last-activity timestamp, and a subsequent refresh would see a "recent"
+    // timestamp and fail to re-lock. Only a successful PIN unlock (below)
+    // is allowed to record activity again.
     const handler = () => {
+      if (locked) return
       recordActivity()
       resetTimer()
     }
     events.forEach((event) => window.addEventListener(event, handler, { passive: true }))
 
+    // Only remove the listeners here -- NOT the pending timer. This effect
+    // re-runs on every `locked`/`timeoutMs` change, including right after
+    // handleUnlock/handleTimeoutChange call scheduleLock() to arm a fresh
+    // timer; clearing timerRef.current here would immediately wipe that
+    // out again before it could ever fire. Timer lifecycle is owned by
+    // scheduleLock() (which always clears any prior timer before setting a
+    // new one) and the unmount-only cleanup below.
     return () => {
       events.forEach((event) => window.removeEventListener(event, handler))
-      if (timerRef.current) clearTimeout(timerRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeoutMs, locked, isChecking])
+
+  // Clear the pending timer only when the component actually unmounts, not
+  // on every dependency change of the effect above.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -188,7 +212,7 @@ export function InactivityLock({ children }: { children: React.ReactNode }) {
       setLocked(false)
       setPin("")
       recordActivity()
-      resetTimer()
+      scheduleLock(timeoutMs)
     } catch (err) {
       setError(err instanceof Error ? err.message.toUpperCase() : "FAILED TO UNLOCK")
     } finally {
